@@ -4,11 +4,9 @@ Run with: streamlit run app.py
 """
 
 import glob
-import os
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 
-import pandas as pd
 import plotly.express as px
 import streamlit as st
 
@@ -160,7 +158,7 @@ elif page == "Dashboard":
             fig.update_layout(legend=dict(
                 orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1
             ))
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
 
         with col_b:
             st.subheader("Status Breakdown")
@@ -173,14 +171,14 @@ elif page == "Dashboard":
                     hole=0.4,
                 )
                 fig2.update_traces(textinfo="percent+label")
-                st.plotly_chart(fig2, use_container_width=True)
+                st.plotly_chart(fig2, width='stretch')
 
     st.subheader("Recent Admissions (last 10)")
     recent = db.query_recent_admissions(conn, n=10)
     if recent.empty:
         st.info("No data yet. Go to Ingest to load CSV files.")
     else:
-        st.dataframe(recent, use_container_width=True, hide_index=True)
+        st.dataframe(recent, width='stretch', hide_index=True)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -226,7 +224,7 @@ elif page == "Admissions":
         start = (page_num - 1) * PAGE_SIZE
         page_df = df.iloc[start : start + PAGE_SIZE]
 
-        st.dataframe(page_df, use_container_width=True, hide_index=True)
+        st.dataframe(page_df, width='stretch', hide_index=True)
 
         # TID detail expander
         selected_tid = st.text_input("Enter TID to view package details")
@@ -236,7 +234,7 @@ elif page == "Admissions":
                 st.warning(f"No packages found for TID: {selected_tid}")
             else:
                 with st.expander(f"Packages for {selected_tid}", expanded=True):
-                    st.dataframe(pkgs, use_container_width=True, hide_index=True)
+                    st.dataframe(pkgs, width='stretch', hide_index=True)
 
         st.divider()
         xlsx_bytes = reports.generate_report(df, "Admissions", "admission_report")
@@ -257,7 +255,8 @@ elif page == "Reports":
 
     report_type = st.selectbox(
         "Report type",
-        ["Admission Summary", "Monthly Summary", "FY Summary", "FY Admission Detail", "Raw Export"],
+        ["Admission Summary", "Monthly Summary", "FY Summary", "FY Admission Detail",
+         "Month Admission Detail", "Raw Export"],
     )
 
     with st.sidebar:
@@ -277,6 +276,10 @@ elif page == "Reports":
         elif report_type == "FY Admission Detail":
             fy_detail_options = db.get_available_fys(conn)
             fy_detail_pick = st.selectbox("Financial Year", fy_detail_options)
+
+        elif report_type == "Month Admission Detail":
+            month_options = db.get_available_months(conn)
+            month_detail_pick = st.multiselect("Month(s)", month_options, default=month_options[-1:] if month_options else [])
 
     # Build filters dict for admissions-level queries
     adm_filters: dict = {}
@@ -309,7 +312,7 @@ elif page == "Reports":
 
     if report_type in ("Admission Summary", "Monthly Summary", "FY Summary"):
         st.subheader(f"Preview ({min(20, len(df))} of {len(df):,} rows)")
-        st.dataframe(df.head(20), use_container_width=True, hide_index=True)
+        st.dataframe(df.head(20), width='stretch', hide_index=True)
         if not df.empty:
             xlsx_bytes = reports.generate_report(df, title, rtype)
             st.download_button(
@@ -331,7 +334,7 @@ elif page == "Reports":
             title = f"MAA FY Admission Detail {fy_detail_pick}"
 
             st.subheader(f"Preview ({min(20, len(df))} of {len(df):,} rows)")
-            st.dataframe(df.head(20), use_container_width=True, hide_index=True)
+            st.dataframe(df.head(20), width='stretch', hide_index=True)
 
             if not df.empty:
                 xlsx_bytes = reports.generate_fy_detail_report(df, fy_detail_pick)
@@ -346,6 +349,29 @@ elif page == "Reports":
         else:
             st.info("No financial year data available. Ingest some records first.")
 
+    elif report_type == "Month Admission Detail":
+        month_detail_pick = locals().get("month_detail_pick") or []
+        if month_detail_pick:
+            df = db.query_month_admission_detail(conn, month_detail_pick)
+            label = ", ".join(sorted(month_detail_pick))
+            title = f"MAA Month Admission Detail {label}"
+
+            st.subheader(f"Preview ({min(20, len(df))} of {len(df):,} rows)")
+            st.dataframe(df.head(20), width='stretch', hide_index=True)
+
+            if not df.empty:
+                xlsx_bytes = reports.generate_month_detail_report(df, label)
+                st.download_button(
+                    label="Download Month Admission Detail as Excel",
+                    data=xlsx_bytes,
+                    file_name=f"MAA_Month_Detail_{label.replace(', ', '_')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            else:
+                st.info("No data for the selected month(s).")
+        else:
+            st.info("Select at least one month from the sidebar.")
+
     else:  # Raw Export
         df = db.query_all_claims(conn)
         if status_filter:
@@ -354,7 +380,7 @@ elif page == "Reports":
         title = "MAA Raw Export"
 
         st.subheader(f"Preview ({min(20, len(df))} of {len(df):,} rows)")
-        st.dataframe(df.head(20), use_container_width=True, hide_index=True)
+        st.dataframe(df.head(20), width='stretch', hide_index=True)
 
         if not df.empty:
             xlsx_bytes = reports.generate_report(df, title, rtype)

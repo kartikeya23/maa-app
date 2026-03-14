@@ -177,14 +177,14 @@ def _month_label(ym: str) -> str:
         return ym
 
 
-def generate_fy_detail_report(df: pd.DataFrame, fy_label: str) -> bytes:
+def _generate_detail_report(df: pd.DataFrame, sheet_title: str) -> bytes:
     """
-    Generates a structured Excel workbook for the FY Admission Detail report.
+    Shared logic for FY and Month admission detail reports.
     Layout: column header row → per-month sections (header, data, subtotal, blank) → grand total.
     """
     wb = Workbook()
     ws = wb.active
-    ws.title = f"FY {fy_label}"[:31]
+    ws.title = sheet_title[:31]
 
     num_cols = len(_DETAIL_HEADERS)
 
@@ -255,6 +255,16 @@ def generate_fy_detail_report(df: pd.DataFrame, fy_label: str) -> bytes:
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
+
+
+def generate_fy_detail_report(df: pd.DataFrame, fy_label: str) -> bytes:
+    """Generates a structured Excel workbook for the FY Admission Detail report."""
+    return _generate_detail_report(df, f"FY {fy_label}")
+
+
+def generate_month_detail_report(df: pd.DataFrame, title: str) -> bytes:
+    """Generates a structured Excel workbook for the Month Admission Detail report."""
+    return _generate_detail_report(df, title)
 
 
 def generate_report(df: pd.DataFrame, title: str, report_type: str) -> bytes:
