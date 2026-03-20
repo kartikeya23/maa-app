@@ -177,20 +177,18 @@ def ingest(csv_files: list[str], dry_run: bool = False):
 
     for csv_path in csv_files:
         rows = parse_csv(csv_path)
-
+        new, updated, unchanged = db.upsert_claims(conn, rows, dry_run=dry_run)
+        name = Path(csv_path).name
         if dry_run:
-            print(f"  [DRY RUN] {Path(csv_path).name}: {len(rows)} rows parsed (DB not modified)")
-            total_new += len(rows)
+            print(f"  [DRY RUN] {name}: {new} new, {updated} updated, {unchanged} unchanged (estimated)")
         else:
-            new, updated, unchanged = db.upsert_claims(conn, rows)
-            name = Path(csv_path).name
             print(f"  Ingested {name}: {len(rows)} rows — {new} new, {updated} updated, {unchanged} unchanged")
-            total_new += new
-            total_updated += updated
-            total_unchanged += unchanged
+        total_new += new
+        total_updated += updated
+        total_unchanged += unchanged
 
     if dry_run:
-        print(f"\nDry run complete — {total_new} rows parsed total. DB NOT modified.")
+        print(f"\nDry run complete — {total_new} new, {total_updated} updated, {total_unchanged} unchanged (estimated). DB NOT modified.")
     else:
         total = db.get_total_record_count(conn)
         print(f"\nTotal: {total_new} new, {total_updated} updated, {total_unchanged} unchanged")

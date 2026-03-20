@@ -12,7 +12,6 @@ from pathlib import Path
 import pandas as pd
 
 DB_PATH = Path(__file__).parent / "maa.db"
-CSV_DIR = Path(__file__).parent.parent  # CSVs live in the parent "Latest MAA Exports" folder
 
 # ── Schema ────────────────────────────────────────────────────────────────────
 
@@ -97,6 +96,21 @@ ALL_COLUMNS = [
 ]
 
 
+# ── Status SQL fragments ──────────────────────────────────────────────────────
+# Approved: approved OR paid, excluding pre-auth
+_APPROVED_CASE = (
+    "CASE WHEN (LOWER(status) LIKE '%approved%' OR LOWER(status) LIKE '%paid%')"
+    "      AND LOWER(status) NOT LIKE '%pre%'"
+    " THEN approved_amount ELSE 0 END"
+)
+# Paid: any paid status
+_PAID_CASE = "CASE WHEN LOWER(status) LIKE '%paid%' THEN approved_amount ELSE 0 END"
+# Rejected: any rejected status (uses pkg_rate since no approved_amount for rejections)
+_REJECTED_CASE = "CASE WHEN LOWER(status) LIKE '%rejected%' THEN pkg_rate ELSE 0 END"
+# Received: paid amount after 10% TDS deduction
+_RECEIVED_CASE = f"({_PAID_CASE}) * 0.9"
+
+
 def _row_hash(row: dict) -> str:
     payload = {k: row.get(k) for k in MUTABLE_FIELDS}
     return hashlib.md5(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
@@ -112,11 +126,12 @@ def init_db(path: str | Path = DB_PATH) -> sqlite3.Connection:
 
 # ── Upsert ────────────────────────────────────────────────────────────────────
 
-def upsert_claims(conn: sqlite3.Connection, rows: list[dict]) -> tuple[int, int, int]:
+def upsert_claims(conn: sqlite3.Connection, rows: list[dict], dry_run: bool = False) -> tuple[int, int, int]:
     """
     Insert or update claim rows. Returns (new, updated, unchanged).
 
     Each row dict must have keys matching ALL_COLUMNS (except last_ingested_at).
+    When dry_run=True, performs all classification logic but skips writes.
     """
     new = updated = unchanged = 0
     now = datetime.now().isoformat(timespec="seconds")
@@ -162,12 +177,14 @@ def upsert_claims(conn: sqlite3.Connection, rows: list[dict]) -> tuple[int, int,
             unchanged += 1
             continue  # nothing to write
 
-        row["last_ingested_at"] = now
-        values = [row.get(col) for col in ALL_COLUMNS]
-        conn.execute(upsert_sql, values)
-        conn.execute(hash_upsert_sql, (*pk, h))
+        if not dry_run:
+            row["last_ingested_at"] = now
+            values = [row.get(col) for col in ALL_COLUMNS]
+            conn.execute(upsert_sql, values)
+            conn.execute(hash_upsert_sql, (*pk, h))
 
-    conn.commit()
+    if not dry_run:
+        conn.commit()
     return new, updated, unchanged
 
 
@@ -212,18 +229,14 @@ def query_admissions(conn: sqlite3.Connection, filters: dict | None = None) -> p
                 julianday(COALESCE(date_of_discharge, date('now'))) -
                 julianday(date_of_admission)
                 AS INTEGER
-            ) + 1                                AS days,
-            COUNT(*)                             AS packages,
-            SUM(CASE WHEN LOWER(status) LIKE '%approved%' AND LOWER(status) NOT LIKE '%paid%'
-                     THEN approved_amount ELSE 0 END) AS total_approved,
-            SUM(CASE WHEN LOWER(status) LIKE '%paid%'
-                     THEN approved_amount ELSE 0 END) AS total_paid,
-            SUM(CASE WHEN LOWER(status) LIKE '%approved%' AND LOWER(status) NOT LIKE '%paid%'
-                     THEN approved_amount ELSE 0 END) -
-            SUM(CASE WHEN LOWER(status) LIKE '%paid%'
-                     THEN approved_amount ELSE 0 END) AS outstanding,
-            SUM(query_raised)                    AS queries,
-            GROUP_CONCAT(DISTINCT status)        AS statuses
+            ) + 1                        AS days,
+            COUNT(*)                     AS packages,
+            SUM({_APPROVED_CASE})        AS total_approved,
+            SUM({_PAID_CASE})            AS total_paid,
+            SUM({_RECEIVED_CASE})        AS total_received,
+            SUM({_APPROVED_CASE}) - SUM({_PAID_CASE}) AS outstanding,
+            SUM(query_raised)            AS queries,
+            GROUP_CONCAT(DISTINCT status) AS statuses
         FROM claims
         {where_sql}
         GROUP BY tid
@@ -245,19 +258,15 @@ def fy_of(date_str: str) -> str:
 
 
 def query_monthly_summary(conn: sqlite3.Connection) -> pd.DataFrame:
-    sql = """
+    sql = f"""
         SELECT
-            strftime('%Y-%m', date_of_admission)                                   AS month,
-            COUNT(DISTINCT tid)                                                    AS admissions,
-            COUNT(*)                                                               AS packages,
-            SUM(CASE WHEN LOWER(status) LIKE '%approved%' AND LOWER(status) NOT LIKE '%paid%'
-                     THEN approved_amount ELSE 0 END)                              AS total_approved,
-            SUM(CASE WHEN LOWER(status) LIKE '%paid%'
-                     THEN approved_amount ELSE 0 END)                             AS total_paid,
-            SUM(CASE WHEN LOWER(status) LIKE '%approved%' AND LOWER(status) NOT LIKE '%paid%'
-                     THEN approved_amount ELSE 0 END) -
-            SUM(CASE WHEN LOWER(status) LIKE '%paid%'
-                     THEN approved_amount ELSE 0 END)                             AS outstanding
+            strftime('%Y-%m', date_of_admission)  AS month,
+            COUNT(DISTINCT tid)                   AS admissions,
+            COUNT(*)                              AS packages,
+            SUM({_APPROVED_CASE})                 AS total_approved,
+            SUM({_PAID_CASE})                     AS total_paid,
+            SUM({_RECEIVED_CASE})                 AS total_received,
+            SUM({_APPROVED_CASE}) - SUM({_PAID_CASE}) AS outstanding
         FROM claims
         WHERE date_of_admission IS NOT NULL
         GROUP BY month
@@ -277,11 +286,11 @@ def query_fy_summary(conn: sqlite3.Connection) -> pd.DataFrame:
     )
     if df.empty:
         return pd.DataFrame(columns=["financial_year", "admissions", "packages",
-                                     "total_approved", "total_paid", "outstanding"])
+                                     "total_approved", "total_paid", "total_received", "outstanding"])
     df["financial_year"] = df["date_of_admission"].apply(fy_of)
     s = df["status"].str.lower().fillna("")
     df["_approved_amt"] = df["approved_amount"].where(
-        s.str.contains("approved") & ~s.str.contains("paid"), 0
+        (s.str.contains("approved") | s.str.contains("paid")) & ~s.str.contains("pre"), 0
     )
     df["_paid_amt"] = df["approved_amount"].where(s.str.contains("paid"), 0)
     summary = (
@@ -294,6 +303,7 @@ def query_fy_summary(conn: sqlite3.Connection) -> pd.DataFrame:
         )
         .reset_index()
     )
+    summary["total_received"] = summary["total_paid"] * 0.9
     summary["outstanding"] = summary["total_approved"] - summary["total_paid"]
     return summary.sort_values("financial_year")
 
@@ -326,21 +336,19 @@ def query_month_admission_detail(conn: sqlite3.Connection, months: list[str]) ->
     if not months:
         return pd.DataFrame(columns=["month", "tid", "patient_name",
                                      "date_of_admission", "date_of_discharge",
-                                     "paid", "approved", "rejected"])
+                                     "paid", "received", "approved", "rejected"])
     placeholders = ",".join("?" for _ in months)
     sql = f"""
         SELECT
-            strftime('%Y-%m', date_of_admission)                          AS month,
+            strftime('%Y-%m', date_of_admission)  AS month,
             tid,
             patient_name,
             date_of_admission,
             date_of_discharge,
-            SUM(CASE WHEN LOWER(status) LIKE '%paid%'
-                     THEN approved_amount ELSE 0 END)                     AS paid,
-            SUM(CASE WHEN LOWER(status) LIKE '%approved%' AND LOWER(status) NOT LIKE '%paid%'
-                     THEN approved_amount ELSE 0 END)                     AS approved,
-            SUM(CASE WHEN LOWER(status) LIKE '%rejected%'
-                     THEN pkg_rate ELSE 0 END)                            AS rejected
+            SUM({_APPROVED_CASE})                 AS approved,
+            SUM({_PAID_CASE})                     AS paid,
+            SUM({_RECEIVED_CASE})                 AS received,
+            SUM({_REJECTED_CASE})                 AS rejected
         FROM claims
         WHERE strftime('%Y-%m', date_of_admission) IN ({placeholders})
         GROUP BY tid
@@ -351,29 +359,28 @@ def query_month_admission_detail(conn: sqlite3.Connection, months: list[str]) ->
 
 def query_fy_admission_detail(conn: sqlite3.Connection, fy: str) -> pd.DataFrame:
     """
-    Returns one row per TID for the given FY, with paid/approved/rejected amounts.
+    Returns one row per TID for the given FY, with paid/received/approved/rejected amounts.
     Amount rules:
-      paid     = SUM(approved_amount) WHERE LOWER(status) LIKE '%paid%'
-      approved = SUM(approved_amount) WHERE LOWER(status) LIKE '%approved%' AND NOT LIKE '%paid%'
-      rejected = SUM(pkg_rate)        WHERE LOWER(status) LIKE '%rejected%'
+      paid     = SUM(approved_amount) WHERE status contains 'paid'
+      received = paid * 0.9 (after 10% TDS)
+      approved = SUM(approved_amount) WHERE (approved OR paid) AND NOT pre-auth, minus paid
+      rejected = SUM(pkg_rate)        WHERE status contains 'rejected'
     """
     start_year = int(fy.split("-")[0])
     date_from = f"{start_year}-04-01"
     date_to   = f"{start_year + 1}-03-31"
 
-    sql = """
+    sql = f"""
         SELECT
-            strftime('%Y-%m', date_of_admission)                          AS month,
+            strftime('%Y-%m', date_of_admission)  AS month,
             tid,
             patient_name,
             date_of_admission,
             date_of_discharge,
-            SUM(CASE WHEN LOWER(status) LIKE '%paid%'
-                     THEN approved_amount ELSE 0 END)                     AS paid,
-            SUM(CASE WHEN LOWER(status) LIKE '%approved%' AND LOWER(status) NOT LIKE '%paid%'
-                     THEN approved_amount ELSE 0 END)                     AS approved,
-            SUM(CASE WHEN LOWER(status) LIKE '%rejected%'
-                     THEN pkg_rate ELSE 0 END)                            AS rejected
+            SUM({_APPROVED_CASE})                 AS approved,
+            SUM({_PAID_CASE})                     AS paid,
+            SUM({_RECEIVED_CASE})                 AS received,
+            SUM({_REJECTED_CASE})                 AS rejected
         FROM claims
         WHERE date_of_admission >= ? AND date_of_admission <= ?
         GROUP BY tid
@@ -383,32 +390,36 @@ def query_fy_admission_detail(conn: sqlite3.Connection, fy: str) -> pd.DataFrame
 
 
 def query_total_stats(conn: sqlite3.Connection) -> dict:
-    row = conn.execute("""
+    row = conn.execute(f"""
         SELECT
-            COUNT(DISTINCT tid) AS admissions,
-            SUM(CASE WHEN LOWER(status) LIKE '%approved%' AND LOWER(status) NOT LIKE '%paid%'
-                     THEN approved_amount ELSE 0 END) AS total_approved,
-            SUM(CASE WHEN LOWER(status) LIKE '%paid%'
-                     THEN approved_amount ELSE 0 END) AS total_paid,
-            SUM(CASE WHEN LOWER(status) LIKE '%approved%' AND LOWER(status) NOT LIKE '%paid%'
-                     THEN approved_amount ELSE 0 END) -
-            SUM(CASE WHEN LOWER(status) LIKE '%paid%'
-                     THEN approved_amount ELSE 0 END) AS outstanding
+            COUNT(DISTINCT tid)                       AS admissions,
+            SUM({_APPROVED_CASE})                     AS total_approved,
+            SUM({_PAID_CASE})                         AS total_paid,
+            SUM({_RECEIVED_CASE})                     AS total_received,
+            SUM({_APPROVED_CASE}) - SUM({_PAID_CASE}) AS outstanding
         FROM claims
     """).fetchone()
     return {
         "admissions": row[0] or 0,
         "total_approved": row[1] or 0.0,
         "total_paid": row[2] or 0.0,
-        "outstanding": row[3] or 0.0,
+        "total_received": row[3] or 0.0,
+        "outstanding": row[4] or 0.0,
     }
 
 
 def query_status_breakdown(conn: sqlite3.Connection) -> pd.DataFrame:
     sql = """
-        SELECT status, COUNT(DISTINCT tid) AS count
+        SELECT
+            CASE
+                WHEN LOWER(status) LIKE '%paid%'                                      THEN 'Paid'
+                WHEN LOWER(status) LIKE '%approved%' AND LOWER(status) NOT LIKE '%pre%' THEN 'Approved'
+                WHEN LOWER(status) LIKE '%rejected%'                                  THEN 'Rejected'
+                ELSE 'Other'
+            END AS status,
+            COUNT(DISTINCT tid) AS count
         FROM claims
-        GROUP BY status
+        GROUP BY 1
         ORDER BY count DESC
     """
     return pd.read_sql_query(sql, conn)
@@ -418,10 +429,8 @@ def query_recent_admissions(conn: sqlite3.Connection, n: int = 10) -> pd.DataFra
     sql = f"""
         SELECT tid, patient_name, gender, age, date_of_admission, date_of_discharge,
                COUNT(*) AS packages,
-               SUM(CASE WHEN LOWER(status) LIKE '%approved%' AND LOWER(status) NOT LIKE '%paid%'
-                        THEN approved_amount ELSE 0 END) AS total_approved,
-               SUM(CASE WHEN LOWER(status) LIKE '%paid%'
-                        THEN approved_amount ELSE 0 END) AS total_paid,
+               SUM({_APPROVED_CASE}) AS total_approved,
+               SUM({_PAID_CASE})     AS total_paid,
                GROUP_CONCAT(DISTINCT status) AS statuses
         FROM claims
         WHERE date_of_admission IS NOT NULL

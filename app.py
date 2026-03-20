@@ -92,14 +92,16 @@ if page == "Ingest":
         for csv_path in csv_paths:
             try:
                 rows = ingest_module.parse_csv(csv_path)
+                new, updated, unchanged = db.upsert_claims(conn, rows, dry_run=dry_run)
+                total_new       += new
+                total_updated   += updated
+                total_unchanged += unchanged
                 if dry_run:
-                    st.write(f"🔍 `{Path(csv_path).name}` — {len(rows)} rows parsed (dry run)")
-                    total_new += len(rows)
+                    st.write(
+                        f"🔍 `{Path(csv_path).name}` — "
+                        f"**{new} new** (est.) | {updated} updated (est.) | {unchanged} unchanged"
+                    )
                 else:
-                    new, updated, unchanged = db.upsert_claims(conn, rows)
-                    total_new       += new
-                    total_updated   += updated
-                    total_unchanged += unchanged
                     st.write(
                         f"✅ `{Path(csv_path).name}` — "
                         f"**{new} new** | {updated} updated | {unchanged} unchanged"
@@ -109,7 +111,10 @@ if page == "Ingest":
 
         st.divider()
         if dry_run:
-            st.info(f"Dry run: {total_new} rows would be processed.")
+            st.info(
+                f"Dry run: **{total_new} new** (est.), {total_updated} updated (est.), "
+                f"{total_unchanged} unchanged. DB not modified."
+            )
         else:
             total = db.get_total_record_count(conn)
             st.success(
@@ -130,11 +135,12 @@ elif page == "Dashboard":
 
     stats = db.query_total_stats(conn)
 
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("Total Admissions",  f"{stats['admissions']:,}")
     c2.metric("Total Approved",    fmt_inr(stats["total_approved"]))
     c3.metric("Total Paid",        fmt_inr(stats["total_paid"]))
-    c4.metric("Outstanding",       fmt_inr(stats["outstanding"]))
+    c4.metric("Received (−TDS)",   fmt_inr(stats["total_received"]))
+    c5.metric("Outstanding",       fmt_inr(stats["outstanding"]))
 
     st.divider()
 
@@ -259,36 +265,33 @@ elif page == "Reports":
          "Month Admission Detail", "Raw Export"],
     )
 
+    # Sidebar filter variables — initialized before conditional sidebar blocks
+    month_pick = None
+    fy_pick = "(all)"
+    fy_detail_pick = None
+    month_detail_pick = []
+
     with st.sidebar:
         st.subheader("Report Filters")
         opts = db.get_filter_options(conn)
         status_filter = st.multiselect("Status", opts["status"])
 
         if report_type == "Monthly Summary":
-            month_pick = st.text_input("Month (YYYY-MM, blank = all)")
+            month_pick = st.text_input("Month (YYYY-MM, blank = all)") or None
         elif report_type == "FY Summary":
-            fy_options = []
             fy_df = db.query_fy_summary(conn)
-            if not fy_df.empty:
-                fy_options = sorted(fy_df["financial_year"].unique().tolist())
+            fy_options = sorted(fy_df["financial_year"].unique().tolist()) if not fy_df.empty else []
             fy_pick = st.selectbox("Financial Year", ["(all)"] + fy_options)
-
         elif report_type == "FY Admission Detail":
             fy_detail_options = db.get_available_fys(conn)
-            fy_detail_pick = st.selectbox("Financial Year", fy_detail_options)
-
+            fy_detail_pick = st.selectbox("Financial Year", fy_detail_options) if fy_detail_options else None
         elif report_type == "Month Admission Detail":
             month_options = db.get_available_months(conn)
-            month_detail_pick = st.multiselect("Month(s)", month_options, default=month_options[-1:] if month_options else [])
-
-    # Build filters dict for admissions-level queries
-    adm_filters: dict = {}
-    if status_filter:
-        # For multi-select, we'll post-filter the DataFrame
-        pass
+            month_options.sort(reverse=True)
+            month_detail_pick = st.multiselect("Month(s)", month_options, default=month_options[:1] if month_options else [])
 
     if report_type == "Admission Summary":
-        df = db.query_admissions(conn, adm_filters)
+        df = db.query_admissions(conn)
         if status_filter:
             df = df[df["statuses"].apply(
                 lambda s: any(f in (s or "") for f in status_filter)
@@ -298,14 +301,14 @@ elif page == "Reports":
 
     elif report_type == "Monthly Summary":
         df = db.query_monthly_summary(conn)
-        if "month_pick" in dir() and month_pick:
+        if month_pick:
             df = df[df["month"] == month_pick]
         rtype = "monthly_summary"
         title = "MAA Monthly Summary"
 
     elif report_type == "FY Summary":
         df = db.query_fy_summary(conn)
-        if "fy_pick" in dir() and fy_pick != "(all)":
+        if fy_pick != "(all)":
             df = df[df["financial_year"] == fy_pick]
         rtype = "fy_summary"
         title = "MAA FY Summary"
@@ -325,12 +328,8 @@ elif page == "Reports":
             st.info("No data for this selection.")
 
     elif report_type == "FY Admission Detail":
-        fy_detail_pick = locals().get("fy_detail_pick") or (
-            db.get_available_fys(conn) or [None]
-        )[0]
         if fy_detail_pick:
             df = db.query_fy_admission_detail(conn, fy_detail_pick)
-            rtype = "fy_admission_detail"
             title = f"MAA FY Admission Detail {fy_detail_pick}"
 
             st.subheader(f"Preview ({min(20, len(df))} of {len(df):,} rows)")
@@ -350,7 +349,6 @@ elif page == "Reports":
             st.info("No financial year data available. Ingest some records first.")
 
     elif report_type == "Month Admission Detail":
-        month_detail_pick = locals().get("month_detail_pick") or []
         if month_detail_pick:
             df = db.query_month_admission_detail(conn, month_detail_pick)
             label = ", ".join(sorted(month_detail_pick))

@@ -20,6 +20,9 @@ AMBER_FILL  = StylePatternFill(fill_type="solid", fgColor="FFEB9C")
 TOTAL_FILL  = StylePatternFill(fill_type="solid", fgColor="D9E1F2")
 TOTAL_FONT  = Font(bold=True, name="Calibri")
 
+ROW_FILL_ODD  = StylePatternFill(fill_type="solid", fgColor="FFFFFF")
+ROW_FILL_EVEN = StylePatternFill(fill_type="solid", fgColor="EEF2F9")
+
 RUPEE_FMT   = '₹#,##0.00'
 NUMBER_FMT  = '#,##0'
 DATE_FMT    = 'dd-mmm-yyyy'
@@ -37,6 +40,7 @@ ADMISSION_COLS = [
     ("# Packages",      "packages",        NUMBER_FMT),
     ("Total Approved",  "total_approved",  RUPEE_FMT),
     ("Total Paid",      "total_paid",      RUPEE_FMT),
+    ("Received (−TDS)", "total_received",  RUPEE_FMT),
     ("Outstanding",     "outstanding",     RUPEE_FMT),
     ("Query Count",     "queries",         NUMBER_FMT),
     ("Statuses",        "statuses",        None),
@@ -48,6 +52,7 @@ MONTHLY_COLS = [
     ("Packages",        "packages",        NUMBER_FMT),
     ("Total Approved",  "total_approved",  RUPEE_FMT),
     ("Total Paid",      "total_paid",      RUPEE_FMT),
+    ("Received (−TDS)", "total_received",  RUPEE_FMT),
     ("Outstanding",     "outstanding",     RUPEE_FMT),
 ]
 
@@ -57,12 +62,13 @@ FY_COLS = [
     ("Packages",        "packages",        NUMBER_FMT),
     ("Total Approved",  "total_approved",  RUPEE_FMT),
     ("Total Paid",      "total_paid",      RUPEE_FMT),
+    ("Received (−TDS)", "total_received",  RUPEE_FMT),
     ("Outstanding",     "outstanding",     RUPEE_FMT),
 ]
 
-AMOUNT_COLS = {"total_approved", "total_paid", "outstanding",
+AMOUNT_COLS = {"total_approved", "total_paid", "total_received", "outstanding",
                "approved_amount", "paid_amount", "pkg_rate"}
-SUMMABLE_COLS = {"total_approved", "total_paid", "outstanding",
+SUMMABLE_COLS = {"total_approved", "total_paid", "total_received", "outstanding",
                  "approved_amount", "paid_amount", "packages",
                  "admissions", "queries", "query_raised", "days"}
 
@@ -108,26 +114,29 @@ def _write_sheet(ws, df: pd.DataFrame, col_defs: list[tuple], title: str,
     for ri, (_, row) in enumerate(df.iterrows(), 2):
         for ci, (key, fmt) in enumerate(zip(db_keys, fmts), 1):
             val = row.get(key)
-            if pd.isna(val) if not isinstance(val, str) else (val is None):
+            if not isinstance(val, str) and pd.isna(val):
                 val = None
             cell = ws.cell(row=ri, column=ci, value=val)
             if fmt:
                 cell.number_format = fmt
 
-        # Status-based row colouring
+        # Row fill: status-based overrides alternating
+        alt_fill = ROW_FILL_EVEN if ri % 2 == 0 else ROW_FILL_ODD
         if status_col_idx is not None:
             statuses_val = str(row.get("statuses", "") or "")
             statuses = {s.strip().lower() for s in statuses_val.split(",")}
-            queries   = row.get("queries", 0) or 0
-            if queries and queries > 0:
-                fill = AMBER_FILL
+            queries  = row.get("queries", 0) or 0
+            if queries > 0:
+                row_fill = AMBER_FILL
             elif statuses and all("paid" in s for s in statuses if s):
-                fill = GREEN_FILL
+                row_fill = GREEN_FILL
             else:
-                fill = None
-            if fill:
-                for ci in range(1, len(col_defs) + 1):
-                    ws.cell(row=ri, column=ci).fill = fill
+                row_fill = alt_fill
+        else:
+            row_fill = alt_fill
+
+        for ci in range(1, len(col_defs) + 1):
+            ws.cell(row=ri, column=ci).fill = row_fill
 
     # Summary row
     last_data_row = len(df) + 1
@@ -156,13 +165,13 @@ _MONTH_NAMES = {
 
 _DETAIL_HEADERS = [
     "TID", "Patient Name", "Admission Date", "Discharge Date",
-    "Paid", "Approved (Not Paid)", "Rejected",
+    "Paid", "Received (−TDS)", "Approved (Not Paid)", "Rejected",
 ]
 _DETAIL_KEYS = [
     "tid", "patient_name", "date_of_admission", "date_of_discharge",
-    "paid", "approved", "rejected",
+    "paid", "received", "approved", "rejected",
 ]
-_DETAIL_FMTS = [None, None, DATE_FMT, DATE_FMT, RUPEE_FMT, RUPEE_FMT, RUPEE_FMT]
+_DETAIL_FMTS = [None, None, DATE_FMT, DATE_FMT, RUPEE_FMT, RUPEE_FMT, RUPEE_FMT, RUPEE_FMT]
 
 SUBTOTAL_FILL = StylePatternFill(fill_type="solid", fgColor="D9E1F2")
 SUBTOTAL_FONT = Font(bold=True, name="Calibri")
@@ -198,7 +207,7 @@ def _generate_detail_report(df: pd.DataFrame, sheet_title: str) -> bytes:
     ws.freeze_panes = "A2"
 
     current_row = 2
-    grand_paid = grand_approved = grand_rejected = 0.0
+    grand_paid = grand_received = grand_approved = grand_rejected = 0.0
 
     for month_ym, group in df.groupby("month", sort=False):
         label = _month_label(month_ym)
@@ -211,30 +220,34 @@ def _generate_detail_report(df: pd.DataFrame, sheet_title: str) -> bytes:
         current_row += 1
 
         # Data rows
-        for _, row in group.iterrows():
+        for row_idx, (_, row) in enumerate(group.iterrows()):
+            row_fill = ROW_FILL_EVEN if row_idx % 2 == 0 else ROW_FILL_ODD
             for ci, (key, fmt) in enumerate(zip(_DETAIL_KEYS, _DETAIL_FMTS), 1):
                 val = row.get(key)
                 if not isinstance(val, str) and pd.isna(val):
                     val = None
                 cell = ws.cell(row=current_row, column=ci, value=val)
+                cell.fill = row_fill
                 if fmt:
                     cell.number_format = fmt
             current_row += 1
 
         # Subtotal row
         m_paid     = float(group["paid"].sum())
+        m_received = float(group["received"].sum())
         m_approved = float(group["approved"].sum())
         m_rejected = float(group["rejected"].sum())
         grand_paid     += m_paid
+        grand_received += m_received
         grand_approved += m_approved
         grand_rejected += m_rejected
 
-        subtotal_vals = {1: f"Subtotal — {label}", 5: m_paid, 6: m_approved, 7: m_rejected}
+        subtotal_vals = {1: f"Subtotal — {label}", 5: m_paid, 6: m_received, 7: m_approved, 8: m_rejected}
         for ci in range(1, num_cols + 1):
             cell = ws.cell(row=current_row, column=ci, value=subtotal_vals.get(ci, ""))
             cell.fill = SUBTOTAL_FILL
             cell.font = SUBTOTAL_FONT
-            if ci in (5, 6, 7):
+            if ci in (5, 6, 7, 8):
                 cell.number_format = RUPEE_FMT
         current_row += 1
 
@@ -242,12 +255,12 @@ def _generate_detail_report(df: pd.DataFrame, sheet_title: str) -> bytes:
         current_row += 1
 
     # Grand total row
-    gt_vals = {1: "GRAND TOTAL", 5: grand_paid, 6: grand_approved, 7: grand_rejected}
+    gt_vals = {1: "GRAND TOTAL", 5: grand_paid, 6: grand_received, 7: grand_approved, 8: grand_rejected}
     for ci in range(1, num_cols + 1):
         cell = ws.cell(row=current_row, column=ci, value=gt_vals.get(ci, ""))
         cell.fill = HEADER_FILL
         cell.font = HEADER_FONT
-        if ci in (5, 6, 7):
+        if ci in (5, 6, 7, 8):
             cell.number_format = RUPEE_FMT
 
     _auto_width(ws)
