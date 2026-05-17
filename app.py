@@ -7,6 +7,7 @@ import glob
 from datetime import date
 from pathlib import Path
 
+import pandas as pd
 import plotly.express as px
 import streamlit as st
 
@@ -37,7 +38,7 @@ conn = get_conn()
 st.sidebar.title("🏥 MAA Records")
 page = st.sidebar.radio(
     "Navigate",
-    ["Dashboard", "Ingest", "Admissions", "Reports"],
+    ["Dashboard", "Ingest", "Admissions", "Reports", "Doctor Share"],
     index=0,
 )
 
@@ -390,3 +391,257 @@ elif page == "Reports":
             )
         else:
             st.info("No data for this selection.")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PAGE: DOCTOR SHARE
+# ══════════════════════════════════════════════════════════════════════════════
+
+elif page == "Doctor Share":
+    from datetime import datetime as _dt
+
+    st.title("Doctor Share — Dr. Kavesh")
+
+    available_months = db.get_available_months(conn)
+    if not available_months:
+        st.info("No admission data found. Ingest CSV files first.")
+        st.stop()
+
+    col_month, col_filter = st.columns([1, 2])
+    with col_month:
+        selected_month = st.selectbox(
+            "Month", available_months, index=len(available_months) - 1
+        )
+    with col_filter:
+        STATUS_OPTIONS = ["All", "MAA Paid", "MAA Approved", "Query Raised", "Unpaid to Doctor"]
+        status_filter = st.selectbox("Show", STATUS_OPTIONS)
+
+    # ── Load + filter data ────────────────────────────────────────────────────
+    df = db.get_doctor_expenses(conn, selected_month)
+
+    if not df.empty:
+        if status_filter == "MAA Paid":
+            df = df[df["maa_status"].fillna("").str.lower().str.contains("paid")]
+        elif status_filter == "MAA Approved":
+            df = df[df["maa_status"].fillna("").str.lower().str.contains("approved")]
+        elif status_filter == "Query Raised":
+            df = df[df["maa_status"].fillna("").str.lower().str.contains("query")]
+        elif status_filter == "Unpaid to Doctor":
+            df = df[df["doctor_paid"] == 0]
+
+    # ── Add Entry expander ────────────────────────────────────────────────────
+    with st.expander("➕ Add Entry", expanded=False):
+        entry_type = st.radio(
+            "Patient type", ["MAA Patient", "Non-MAA Patient"], horizontal=True
+        )
+
+        if entry_type == "MAA Patient":
+            search_name = st.text_input("Search patient name (from physical bill)")
+            candidates = []
+
+            if search_name:
+                candidates = db.search_claims_for_matching(
+                    conn, search_name, selected_month, expand=False
+                )
+                if not candidates:
+                    if st.checkbox("No results — expand search to ±1 month?"):
+                        candidates = db.search_claims_for_matching(
+                            conn, search_name, selected_month, expand=True
+                        )
+
+            if candidates:
+                cand_labels = [
+                    f"{c['patient_name']} | TID: {c['tid']} | "
+                    f"Adm: {c['date_of_admission']} | "
+                    f"MAA Paid: {fmt_inr(c['maa_paid'] or 0)} | {c['status']}"
+                    for c in candidates
+                ]
+                selected_idx = st.radio(
+                    "Select matching admission",
+                    range(len(cand_labels)),
+                    format_func=lambda i: cand_labels[i],
+                )
+                chosen = candidates[selected_idx]
+                st.info(
+                    f"Selected: **{chosen['patient_name']}** "
+                    f"(TID: {chosen['tid']}, Adm: {chosen['date_of_admission']})"
+                )
+
+                c1, c2, c3 = st.columns(3)
+                hosp_ex     = c1.number_input("Hospital Ex (₹)",  min_value=0.0, step=100.0, key="ae_hosp")
+                pharma_ex   = c2.number_input("Pharmacy Ex (₹)",  min_value=0.0, step=100.0, key="ae_pharma")
+                dialysis_ex = c3.number_input("Dialysis Ex (₹)",  min_value=0.0, step=100.0, key="ae_dialysis")
+
+                doctor_pct_input = (
+                    st.number_input(
+                        "Doctor % (default 40%)", min_value=0.0, max_value=100.0,
+                        value=40.0, step=5.0, key="ae_pct"
+                    ) / 100.0
+                )
+                doctor_flat_raw = st.number_input(
+                    "Flat override ₹ (0 = use %)", min_value=0.0, step=500.0, key="ae_flat"
+                )
+                comments_input = st.text_input("Comments", key="ae_comments")
+
+                total_ex_preview = hosp_ex + pharma_ex + dialysis_ex
+                maa_preview = chosen["maa_paid"] or 0
+                flat_val = doctor_flat_raw if doctor_flat_raw > 0 else None
+                share_preview = flat_val if flat_val else doctor_pct_input * (maa_preview - total_ex_preview)
+                st.caption(
+                    f"Preview → Total Ex: {fmt_inr(total_ex_preview)} | "
+                    f"MAA Payment: {fmt_inr(maa_preview)} | "
+                    f"Doctor Share: {fmt_inr(share_preview)}"
+                )
+
+                if st.button("Save Entry", type="primary", key="ae_save_maa"):
+                    db.save_doctor_expense(
+                        conn,
+                        month=selected_month,
+                        patient_name=chosen["patient_name"],
+                        admission_date=chosen["date_of_admission"],
+                        hosp_ex=hosp_ex, pharma_ex=pharma_ex, dialysis_ex=dialysis_ex,
+                        doctor_pct=doctor_pct_input,
+                        doctor_flat=flat_val,
+                        comments=comments_input or None,
+                        maa_status=chosen["status"],
+                        tid=chosen["tid"],
+                    )
+                    st.success(f"Added entry for {chosen['patient_name']}.")
+                    st.rerun()
+            elif search_name:
+                st.warning("No matching admissions found.")
+
+        else:  # Non-MAA Patient
+            nm_name     = st.text_input("Patient Name", key="nm_name")
+            nm_date     = st.date_input("Admission Date", key="nm_date")
+            c1, c2, c3  = st.columns(3)
+            nm_hosp     = c1.number_input("Hospital Ex (₹)",  min_value=0.0, step=100.0, key="nm_hosp")
+            nm_pharma   = c2.number_input("Pharmacy Ex (₹)",  min_value=0.0, step=100.0, key="nm_pharma")
+            nm_dialysis = c3.number_input("Dialysis Ex (₹)",  min_value=0.0, step=100.0, key="nm_dialysis")
+            nm_share    = st.number_input("Doctor Share (₹)", min_value=0.0, step=500.0, key="nm_share")
+            nm_comments = st.text_input("Comments", key="nm_comments")
+
+            if st.button("Save Entry", type="primary", key="nm_save"):
+                if not nm_name:
+                    st.error("Patient name is required.")
+                elif nm_share <= 0:
+                    st.error("Doctor share must be greater than 0.")
+                else:
+                    db.save_doctor_expense(
+                        conn,
+                        month=selected_month,
+                        patient_name=nm_name,
+                        admission_date=str(nm_date),
+                        hosp_ex=nm_hosp, pharma_ex=nm_pharma, dialysis_ex=nm_dialysis,
+                        doctor_flat=nm_share,
+                        comments=nm_comments or None,
+                        tid=None,
+                    )
+                    st.success(f"Added non-MAA entry for {nm_name}.")
+                    st.rerun()
+
+    # ── Data table ────────────────────────────────────────────────────────────
+    if df.empty:
+        st.info("No entries for this month/filter. Use '➕ Add Entry' above.")
+    else:
+        display_df = df[[
+            "id", "patient_name", "admission_date",
+            "hosp_ex", "pharma_ex", "dialysis_ex", "total_ex",
+            "maa_payment", "doctor_flat", "doctor_share", "hospital_share",
+            "maa_status", "doctor_paid", "doctor_payment_month", "comments",
+        ]].copy()
+        display_df.insert(0, "_select", False)
+
+        edited = st.data_editor(
+            display_df,
+            column_config={
+                "_select":              st.column_config.CheckboxColumn("✓", default=False, width="small"),
+                "id":                   st.column_config.NumberColumn("ID", disabled=True),
+                "patient_name":         st.column_config.TextColumn("Patient", disabled=True),
+                "admission_date":       st.column_config.TextColumn("Adm. Date", disabled=True),
+                "hosp_ex":              st.column_config.NumberColumn("Hosp Ex ₹", min_value=0, format="₹%.0f"),
+                "pharma_ex":            st.column_config.NumberColumn("Pharma Ex ₹", min_value=0, format="₹%.0f"),
+                "dialysis_ex":          st.column_config.NumberColumn("Dialysis Ex ₹", min_value=0, format="₹%.0f"),
+                "total_ex":             st.column_config.NumberColumn("Total Ex ₹", disabled=True, format="₹%.0f"),
+                "maa_payment":          st.column_config.NumberColumn("MAA Pmt ₹", disabled=True, format="₹%.0f"),
+                "doctor_flat":          st.column_config.NumberColumn("Dr Share Override ₹", min_value=0, format="₹%.0f"),
+                "doctor_share":         st.column_config.NumberColumn("Doctor Share ₹", disabled=True, format="₹%.0f"),
+                "hospital_share":       st.column_config.NumberColumn("Hospital Share ₹", disabled=True, format="₹%.0f"),
+                "maa_status":           st.column_config.TextColumn("MAA Status", disabled=True),
+                "doctor_paid":          st.column_config.CheckboxColumn("Dr Paid", disabled=True),
+                "doctor_payment_month": st.column_config.TextColumn("Paid Month", disabled=True),
+                "comments":             st.column_config.TextColumn("Comments"),
+            },
+            hide_index=True,
+            use_container_width=True,
+            key="doctor_expense_editor",
+        )
+
+        # Persist edits on any change to editable columns
+        editable_cols = ["hosp_ex", "pharma_ex", "dialysis_ex", "doctor_flat", "comments"]
+        changed_mask = (
+            edited[editable_cols].astype(str) != display_df[editable_cols].astype(str)
+        ).any(axis=1)
+        if changed_mask.any():
+            for _, row in edited[changed_mask].iterrows():
+                flat_raw = row["doctor_flat"]
+                flat_val = float(flat_raw) if pd.notna(flat_raw) and flat_raw > 0 else None
+                db.update_doctor_expense(conn, int(row["id"]), {
+                    "hosp_ex":     float(row["hosp_ex"]),
+                    "pharma_ex":   float(row["pharma_ex"]),
+                    "dialysis_ex": float(row["dialysis_ex"]),
+                    "doctor_flat": flat_val,
+                    "comments":    row["comments"] if pd.notna(row["comments"]) else None,
+                })
+            st.rerun()
+
+        # Bulk actions for selected rows
+        selected_ids = edited[edited["_select"]]["id"].tolist()
+        if selected_ids:
+            col_paid, col_del, _ = st.columns([2, 1, 2])
+            with col_paid:
+                pay_month = st.text_input(
+                    f"Payment month for {len(selected_ids)} row(s) (YYYY-MM)",
+                    value=selected_month,
+                    key="pay_month_input",
+                )
+                if st.button(f"Mark {len(selected_ids)} as paid", type="primary"):
+                    db.mark_doctor_paid(conn, [int(i) for i in selected_ids], pay_month)
+                    st.success(f"Marked {len(selected_ids)} row(s) as paid ({pay_month}).")
+                    st.rerun()
+            with col_del:
+                st.write("")
+                st.write("")
+                if st.button(f"🗑 Delete {len(selected_ids)}", type="secondary"):
+                    for id_ in selected_ids:
+                        db.delete_doctor_expense(conn, int(id_))
+                    st.success(f"Deleted {len(selected_ids)} row(s).")
+                    st.rerun()
+
+        # Summary metrics
+        st.divider()
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Total MAA Payment",  fmt_inr(df["maa_payment"].fillna(0).sum()))
+        m2.metric("Total Doctor Share", fmt_inr(df["doctor_share"].fillna(0).sum()))
+        m3.metric("Total Hosp Share",   fmt_inr(df["hospital_share"].fillna(0).sum()))
+        m4.metric("Total Expenses",     fmt_inr(df["total_ex"].sum()))
+
+    # ── Exports (always full month, ignores status filter) ────────────────────
+    export_df = db.get_doctor_expenses(conn, selected_month)
+    if not export_df.empty:
+        st.divider()
+        month_label = reports._month_label(selected_month)
+        col_int, col_doc = st.columns(2)
+        with col_int:
+            st.download_button(
+                label="Download Internal Export",
+                data=reports.generate_doctor_internal(export_df, month_label),
+                file_name=f"DoctorShare_Internal_{selected_month}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        with col_doc:
+            st.download_button(
+                label="Download Doctor Copy",
+                data=reports.generate_doctor_copy(export_df, month_label),
+                file_name=f"DoctorShare_DrKavesh_{selected_month}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
