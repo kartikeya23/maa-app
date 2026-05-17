@@ -153,9 +153,13 @@ def _entry_detail_dialog(row_id: int, conn):
                 t2.metric("Total Paid",      fmt_inr(_paid_amt))
                 t3.metric("Received (−TDS)", fmt_inr(_paid_amt * 0.9))
             st.divider()
-            if st.button("🔗 Unlink TID", key="d_unlink"):
-                # Only clears tid; maa_status is left as-is so the row stays visible in any filter
-                db.update_doctor_expense(conn, row_id, {"tid": None})
+            # on_click fires before the fragment reruns, avoiding the two-click bug
+            # that occurs when buttons are inside non-default tabs in Streamlit 1.55
+            st.button(
+                "🔗 Unlink TID", key="d_unlink",
+                on_click=db.update_doctor_expense,
+                args=(conn, row_id, {"tid": None}),
+            )
         else:
             st.info("No MAA claim linked. Search below to find and link a matching admission.")
             src_name   = st.text_input("Search by name", value=str(r["patient_name"] or ""), key="d_src")
@@ -171,10 +175,11 @@ def _entry_detail_dialog(row_id: int, conn):
                     idx = st.radio("Matching admissions", range(len(lbl)),
                                    format_func=lambda i: lbl[i], key="d_cand")
                     chosen = candidates[idx]
-                    if st.button("🔗 Link to this admission", type="primary", key="d_link"):
-                        # Only sets tid — maa_status is NOT overwritten so the row stays in the
-                        # current filter after the dialog is closed
-                        db.update_doctor_expense(conn, row_id, {"tid": chosen["tid"]})
+                    st.button(
+                        "🔗 Link to this admission", type="primary", key="d_link",
+                        on_click=db.update_doctor_expense,
+                        args=(conn, row_id, {"tid": chosen["tid"]}),
+                    )
                 else:
                     st.warning("No unlinked admissions found. Try expanding to ±1 month.")
 
@@ -761,7 +766,7 @@ elif page == "Doctor Share":
         for _, _row in _page_rows.iterrows():
             _rid = int(_row["id"])
             _c = st.columns(_COLS)
-            _c[0].checkbox("", key=f"chk_{_rid}", label_visibility="collapsed")
+            _c[0].checkbox("Select", key=f"chk_{_rid}", label_visibility="collapsed")
             _ci = 1
             if _multi:
                 _c[_ci].markdown(
