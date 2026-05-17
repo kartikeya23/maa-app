@@ -22,7 +22,7 @@ def mem_db_with_claims(mem_db):
                pkg_speciality_name, package_remark, claim_submission_dt, last_ingested_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                    '', '', '', '', '', '', '', '', '', '', '',
-                   '2025-2026', '', '', 0, 'M', 45, '', '', '', '', '', '', '', '')""",
+                   '2025-2026', '', '', 0, 'M', 45, '', '', '', '', '', '', '', '', '')""",
         [
             ("TID001", "Ravi Kumar", "2025-06-15", "2025-06-18",
              "PKG001", "Test Package", 30000.0, "Claim Paid", 27000.0, 27000.0, "CLM001"),

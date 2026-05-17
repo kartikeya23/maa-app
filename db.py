@@ -497,3 +497,97 @@ def get_total_record_count(conn: sqlite3.Connection) -> int:
     return conn.execute("SELECT COUNT(*) FROM claims").fetchone()[0]
 
 
+# ── Doctor Share queries ──────────────────────────────────────────────────────
+
+def get_doctor_expenses(conn: sqlite3.Connection, month: str) -> pd.DataFrame:
+    """Returns all doctor_expenses for the month joined with computed maa_payment and share fields."""
+    sql = """
+        SELECT
+            de.id,
+            de.tid,
+            de.patient_name,
+            de.admission_date,
+            de.month,
+            de.hosp_ex,
+            de.pharma_ex,
+            de.dialysis_ex,
+            de.doctor_pct,
+            de.doctor_flat,
+            de.comments,
+            de.maa_status,
+            de.doctor_paid,
+            de.doctor_payment_month,
+            CASE WHEN de.tid IS NOT NULL
+                 THEN COALESCE(maa.net_paid, 0.0)
+                 ELSE NULL END AS maa_payment
+        FROM doctor_expenses de
+        LEFT JOIN (
+            SELECT tid,
+                   SUM(CASE WHEN LOWER(status) LIKE '%paid%' THEN approved_amount ELSE 0 END) * 0.9
+                   AS net_paid
+            FROM claims
+            GROUP BY tid
+        ) maa ON de.tid = maa.tid
+        WHERE de.month = ?
+        ORDER BY de.id ASC
+    """
+    df = pd.read_sql_query(sql, conn, params=[month])
+    if df.empty:
+        return df
+
+    df["total_ex"] = df["hosp_ex"] + df["pharma_ex"] + df["dialysis_ex"]
+    df["doctor_share"] = df.apply(
+        lambda r: r["doctor_flat"]
+        if pd.notna(r["doctor_flat"])
+        else r["doctor_pct"] * (r["maa_payment"] - r["total_ex"]),
+        axis=1,
+    )
+    df["hospital_share"] = df.apply(
+        lambda r: r["maa_payment"] - r["doctor_share"] - r["total_ex"]
+        if pd.notna(r["tid"])
+        else None,
+        axis=1,
+    )
+    return df
+
+
+def search_claims_for_matching(
+    conn: sqlite3.Connection,
+    name: str,
+    month: str,
+    expand: bool = False,
+) -> list[dict]:
+    """
+    Fuzzy-search MAA claims by patient name within the given month.
+    If expand=True, also includes the previous and next months.
+    Excludes TIDs already present in doctor_expenses.
+    """
+    months = [month]
+    if expand:
+        from datetime import timedelta
+        dt = datetime.strptime(month + "-01", "%Y-%m-%d")
+        prev = (dt.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
+        nxt = (dt.replace(day=28) + timedelta(days=4)).strftime("%Y-%m")
+        months = [prev, month, nxt]
+
+    placeholders = ",".join("?" for _ in months)
+    sql = f"""
+        SELECT DISTINCT
+            tid,
+            patient_name,
+            date_of_admission,
+            date_of_discharge,
+            SUM(CASE WHEN LOWER(status) LIKE '%paid%' THEN approved_amount ELSE 0 END) * 0.9
+                AS maa_paid,
+            GROUP_CONCAT(DISTINCT status) AS status
+        FROM claims
+        WHERE LOWER(patient_name) LIKE LOWER(?)
+          AND strftime('%Y-%m', date_of_admission) IN ({placeholders})
+          AND tid NOT IN (SELECT tid FROM doctor_expenses WHERE tid IS NOT NULL)
+        GROUP BY tid
+        ORDER BY date_of_admission DESC
+    """
+    rows = conn.execute(sql, [f"%{name}%"] + months).fetchall()
+    cols = ["tid", "patient_name", "date_of_admission", "date_of_discharge", "maa_paid", "status"]
+    return [dict(zip(cols, r)) for r in rows]
+
