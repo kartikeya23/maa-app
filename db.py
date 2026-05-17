@@ -341,6 +341,14 @@ def get_available_months(conn: sqlite3.Connection) -> list[str]:
     return [r[0] for r in rows if r[0]]
 
 
+def get_doctor_expense_months(conn: sqlite3.Connection) -> list[str]:
+    """Returns distinct months present in doctor_expenses, newest first."""
+    rows = conn.execute(
+        "SELECT DISTINCT month FROM doctor_expenses ORDER BY month DESC"
+    ).fetchall()
+    return [r[0] for r in rows]
+
+
 def get_available_fys(conn: sqlite3.Connection) -> list[str]:
     """Returns sorted list of unique FY strings present in claims data."""
     rows = conn.execute(
@@ -499,9 +507,14 @@ def get_total_record_count(conn: sqlite3.Connection) -> int:
 
 # ── Doctor Share queries ──────────────────────────────────────────────────────
 
-def get_doctor_expenses(conn: sqlite3.Connection, month: str) -> pd.DataFrame:
-    """Returns all doctor_expenses for the month joined with computed maa_payment and share fields."""
-    sql = """
+def get_doctor_expenses(conn: sqlite3.Connection, months: str | list[str]) -> pd.DataFrame:
+    """Returns doctor_expenses for one or more months, joined with computed maa_payment and share fields."""
+    if isinstance(months, str):
+        months = [months]
+    if not months:
+        return pd.DataFrame()
+    placeholders = ",".join("?" for _ in months)
+    sql = f"""
         SELECT
             de.id,
             de.tid,
@@ -528,10 +541,10 @@ def get_doctor_expenses(conn: sqlite3.Connection, month: str) -> pd.DataFrame:
             FROM claims
             GROUP BY tid
         ) maa ON de.tid = maa.tid
-        WHERE de.month = ?
-        ORDER BY de.id ASC
+        WHERE de.month IN ({placeholders})
+        ORDER BY de.month ASC, de.id ASC
     """
-    df = pd.read_sql_query(sql, conn, params=[month])
+    df = pd.read_sql_query(sql, conn, params=months)
     if df.empty:
         return df
 
@@ -627,8 +640,14 @@ def save_doctor_expense(
 
 
 def update_doctor_expense(conn: sqlite3.Connection, row_id: int, fields: dict) -> None:
-    """Update mutable fields on a doctor_expenses row. Allowed keys: hosp_ex, pharma_ex, dialysis_ex, doctor_pct, doctor_flat, comments."""
-    allowed = {"hosp_ex", "pharma_ex", "dialysis_ex", "doctor_pct", "doctor_flat", "comments"}
+    """Update fields on a doctor_expenses row.
+    Allowed keys: hosp_ex, pharma_ex, dialysis_ex, doctor_pct, doctor_flat, comments,
+                  doctor_payment_month, maa_status, tid, patient_name, admission_date.
+    """
+    allowed = {
+        "hosp_ex", "pharma_ex", "dialysis_ex", "doctor_pct", "doctor_flat", "comments",
+        "doctor_payment_month", "maa_status", "tid", "patient_name", "admission_date",
+    }
     updates = {k: v for k, v in fields.items() if k in allowed}
     if not updates:
         return
