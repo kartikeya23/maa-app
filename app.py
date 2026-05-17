@@ -397,8 +397,6 @@ elif page == "Reports":
 # ══════════════════════════════════════════════════════════════════════════════
 
 elif page == "Doctor Share":
-    from datetime import datetime as _dt
-
     st.title("Doctor Share — Dr. Kavesh")
 
     available_months = db.get_available_months(conn)
@@ -443,7 +441,7 @@ elif page == "Doctor Share":
                     conn, search_name, selected_month, expand=False
                 )
                 if not candidates:
-                    if st.checkbox("No results — expand search to ±1 month?"):
+                    if st.checkbox("No results — expand search to ±1 month?", key="expand_search"):
                         candidates = db.search_claims_for_matching(
                             conn, search_name, selected_month, expand=True
                         )
@@ -491,6 +489,8 @@ elif page == "Doctor Share":
                     f"MAA Payment: {fmt_inr(maa_preview)} | "
                     f"Doctor Share: {fmt_inr(share_preview)}"
                 )
+                if share_preview < 0:
+                    st.warning("Doctor share is negative — expenses exceed MAA payment.")
 
                 if st.button("Save Entry", type="primary", key="ae_save_maa"):
                     db.save_doctor_expense(
@@ -578,8 +578,12 @@ elif page == "Doctor Share":
 
         # Persist edits on any change to editable columns
         editable_cols = ["hosp_ex", "pharma_ex", "dialysis_ex", "doctor_flat", "comments"]
+
+        def _norm(frame, cols):
+            return frame[cols].fillna("").astype(str)
+
         changed_mask = (
-            edited[editable_cols].astype(str) != display_df[editable_cols].astype(str)
+            _norm(edited, editable_cols) != _norm(display_df, editable_cols)
         ).any(axis=1)
         if changed_mask.any():
             for _, row in edited[changed_mask].iterrows():
