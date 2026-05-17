@@ -148,9 +148,10 @@ def _entry_detail_dialog(row_id: int, conn):
                     hide_index=True, width='stretch',
                 )
                 t1, t2, t3 = st.columns(3)
+                _paid_amt = pkgs.loc[pkgs["status"] == "Claim Paid", "approved_amount"].sum()
                 t1.metric("Total Approved",  fmt_inr(pkgs["approved_amount"].sum()))
-                t2.metric("Total Paid",      fmt_inr(pkgs["paid_amount"].sum()))
-                t3.metric("Received (−TDS)", fmt_inr(pkgs["paid_amount"].sum() * 0.9))
+                t2.metric("Total Paid",      fmt_inr(_paid_amt))
+                t3.metric("Received (−TDS)", fmt_inr(_paid_amt * 0.9))
             st.divider()
             if st.button("🔗 Unlink TID", key="d_unlink"):
                 # Only clears tid; maa_status is left as-is so the row stays visible in any filter
