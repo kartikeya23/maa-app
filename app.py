@@ -548,19 +548,29 @@ elif page == "Doctor Share":
         st.subheader("Filters")
         months_asc = sorted(available_months)
         if months_asc:
-            from_month = st.selectbox(
-                "From Month", months_asc, index=len(months_asc) - 1,
-                format_func=reports._month_label, key="ds_from_month",
+            _month_mode = st.radio(
+                "Month selection", ["Single", "Range"], horizontal=True, key="ds_month_mode",
             )
-            to_month = st.selectbox(
-                "To Month", months_asc, index=len(months_asc) - 1,
-                format_func=reports._month_label, key="ds_to_month",
-            )
-            if from_month > to_month:
-                st.warning("'From' must be ≤ 'To'.")
-                selected_months: list[str] = []
+            if _month_mode == "Single":
+                _single = st.selectbox(
+                    "Month", months_asc, index=len(months_asc) - 1,
+                    format_func=reports._month_label, key="ds_single_month",
+                )
+                selected_months: list[str] = [_single]
             else:
-                selected_months = [m for m in months_asc if from_month <= m <= to_month]
+                from_month = st.selectbox(
+                    "From", months_asc, index=len(months_asc) - 1,
+                    format_func=reports._month_label, key="ds_from_month",
+                )
+                to_month = st.selectbox(
+                    "To", months_asc, index=len(months_asc) - 1,
+                    format_func=reports._month_label, key="ds_to_month",
+                )
+                if from_month > to_month:
+                    st.warning("'From' must be ≤ 'To'.")
+                    selected_months = []
+                else:
+                    selected_months = [m for m in months_asc if from_month <= m <= to_month]
         else:
             selected_months = []
         status_filter = st.multiselect(
