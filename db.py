@@ -25,6 +25,27 @@ CREATE TABLE IF NOT EXISTS claims_hash (
 );
 """
 
+DOCTOR_EXPENSES_DDL = """
+CREATE TABLE IF NOT EXISTS doctor_expenses (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    tid                  TEXT UNIQUE,
+    patient_name         TEXT,
+    admission_date       TEXT,
+    month                TEXT NOT NULL,
+    hosp_ex              REAL DEFAULT 0,
+    pharma_ex            REAL DEFAULT 0,
+    dialysis_ex          REAL DEFAULT 0,
+    doctor_pct           REAL DEFAULT 0.4,
+    doctor_flat          REAL,
+    comments             TEXT,
+    maa_status           TEXT,
+    doctor_paid          INTEGER DEFAULT 0,
+    doctor_payment_month TEXT,
+    created_at           TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at           TEXT DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
 DDL = """
 CREATE TABLE IF NOT EXISTS claims (
     tid                     TEXT,
@@ -120,6 +141,7 @@ def init_db(path: str | Path = DB_PATH) -> sqlite3.Connection:
     conn = sqlite3.connect(str(path))
     conn.executescript(DDL)
     conn.executescript(HASH_DDL)
+    conn.executescript(DOCTOR_EXPENSES_DDL)
     conn.commit()
     return conn
 
