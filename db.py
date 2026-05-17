@@ -561,7 +561,11 @@ def get_doctor_expenses(conn: sqlite3.Connection, months: str | list[str]) -> pd
     )
     df["hospital_share"] = df.apply(
         lambda r: r["maa_payment"] - r["doctor_share"] - r["total_ex"]
-        if pd.notna(r["tid"])
+        if (
+            pd.notna(r["tid"])
+            and pd.notna(r["maa_payment"]) and r["maa_payment"] > 0
+            and pd.notna(r["doctor_share"])
+        )
         else None,
         axis=1,
     )
@@ -606,6 +610,42 @@ def search_claims_for_matching(
     rows = conn.execute(sql, [f"%{name}%"] + months).fetchall()
     cols = ["tid", "patient_name", "date_of_admission", "date_of_discharge", "maa_paid", "status"]
     return [dict(zip(cols, r)) for r in rows]
+
+
+def infer_maa_status(conn: sqlite3.Connection, tid: str) -> str | None:
+    """Infer maa_status from claims data for a linked TID.
+
+    Considers only packages with approved_amount > 0 (non-zero claims).
+    Priority: pending > approved > rejected > paid.
+    Returns None if no non-zero claims exist.
+    """
+    rows = conn.execute(
+        "SELECT status, approved_amount FROM claims WHERE tid = ?", (tid,)
+    ).fetchall()
+    non_zero = [(s, a) for s, a in rows if (a or 0) > 0]
+    if not non_zero:
+        return None
+
+    def _cat(s: str) -> str:
+        sl = s.lower()
+        if "paid" in sl:
+            return "paid"
+        if "rejected" in sl:
+            return "rejected"
+        if "pre" in sl:
+            return "pending"  # Pre Auth states before 'approved' check
+        if "approved" in sl:
+            return "approved"
+        return "pending"  # Pending, Query
+
+    cats = {_cat(s) for s, _ in non_zero}
+    if "pending" in cats:
+        return "Claim Raised"
+    if "approved" in cats:
+        return "Claim Approved"
+    if cats == {"rejected"}:
+        return "Rejected"
+    return "Claim Paid"  # all paid, or mix of paid + rejected
 
 
 # ── Doctor Share write operations ─────────────────────────────────────────────

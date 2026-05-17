@@ -361,6 +361,54 @@ def _prepare_doctor_df(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+_SUBTOTAL_FILL   = StylePatternFill(fill_type="solid", fgColor="FFF2CC")
+_REJECTED_FILL   = StylePatternFill(fill_type="solid", fgColor="FCE4D6")
+_SECTION_HDR_FONT = Font(bold=True, color="1F3864", name="Calibri")
+
+# Column index within DOCTOR_INTERNAL_COLS (1-based) → field name
+_DOCTOR_NUMERIC_COLS = {4: "hosp_ex", 5: "pharma_ex", 6: "dialysis_ex",
+                        7: "total_ex", 8: "maa_payment", 9: "doctor_share",
+                        10: "hospital_share"}
+
+
+def _write_doctor_status_totals(ws, df: pd.DataFrame) -> None:
+    """Append status-wise subtotals for doctor-not-yet-paid entries."""
+    unpaid = df[df["doctor_paid"] == 0].copy()
+    if unpaid.empty:
+        return
+
+    start_row = ws.max_row + 2
+
+    hdr = ws.cell(row=start_row, column=1,
+                  value="Outstanding Summary — Doctor Not Yet Paid")
+    hdr.font = _SECTION_HDR_FONT
+    start_row += 1
+
+    sections = [
+        ("Claim Paid",   unpaid[unpaid["maa_status"] == "Claim Paid"],  _SUBTOTAL_FILL),
+        ("Rejected",     unpaid[unpaid["maa_status"] == "Rejected"],     _REJECTED_FILL),
+        ("Total Unpaid", unpaid,                                         TOTAL_FILL),
+    ]
+    n_cols = len(DOCTOR_INTERNAL_COLS)
+
+    for label, sub, fill in sections:
+        if sub.empty:
+            continue
+        ws.cell(row=start_row, column=1, value=label).font = TOTAL_FONT
+        ws.cell(row=start_row, column=2,
+                value=f"({len(sub)} {'entry' if len(sub) == 1 else 'entries'})"
+                ).font = Font(italic=True, name="Calibri")
+        for col_idx, field in _DOCTOR_NUMERIC_COLS.items():
+            if field in sub.columns:
+                val = sub[field].fillna(0).sum()
+                cell = ws.cell(row=start_row, column=col_idx, value=val)
+                cell.number_format = RUPEE_FMT
+                cell.font = TOTAL_FONT
+        for ci in range(1, n_cols + 1):
+            ws.cell(row=start_row, column=ci).fill = fill
+        start_row += 1
+
+
 def generate_doctor_internal(df: pd.DataFrame, month_label: str) -> bytes:
     """Full internal report: all columns including payment tracking.
 
@@ -369,6 +417,8 @@ def generate_doctor_internal(df: pd.DataFrame, month_label: str) -> bytes:
     wb = Workbook()
     ws = wb.active
     _write_sheet(ws, _prepare_doctor_df(df), DOCTOR_INTERNAL_COLS, f"{month_label} (Internal)")
+    _write_doctor_status_totals(ws, df)
+    _auto_width(ws)
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()

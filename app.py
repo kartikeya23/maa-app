@@ -35,12 +35,27 @@ conn = get_conn()
 
 # ── Sidebar navigation ────────────────────────────────────────────────────────
 
-st.sidebar.title("🏥 MAA Records")
-page = st.sidebar.radio(
-    "Navigate",
-    ["Dashboard", "Ingest", "Admissions", "Reports", "Doctor Share"],
-    index=0,
-)
+if "_page" not in st.session_state:
+    st.session_state["_page"] = "Dashboard"
+
+with st.sidebar:
+    st.title("🏥 MAA Records")
+    for _p in ["Dashboard", "Ingest", "Admissions", "Reports"]:
+        if st.button(
+            _p, key=f"nav_{_p}", width="stretch",
+            type="primary" if st.session_state["_page"] == _p else "secondary",
+        ):
+            st.session_state["_page"] = _p
+
+    st.divider()
+    st.caption("CLINICAL")
+    if st.button(
+        "🩺 Doctor Share", key="nav_ds", width="stretch",
+        type="primary" if st.session_state["_page"] == "Doctor Share" else "secondary",
+    ):
+        st.session_state["_page"] = "Doctor Share"
+
+page = st.session_state["_page"]
 
 # ── Helper ────────────────────────────────────────────────────────────────────
 
@@ -51,6 +66,15 @@ def fmt_inr(val: float) -> str:
 
 
 # ── Doctor Share dialogs (module-level so @st.dialog fragments are stable) ────
+
+def _link_and_infer_status(conn, row_id: int, tid: str) -> None:
+    """Links a TID and auto-infers maa_status from the claim data."""
+    inferred = db.infer_maa_status(conn, tid)
+    updates: dict = {"tid": tid}
+    if inferred:
+        updates["maa_status"] = inferred
+    db.update_doctor_expense(conn, row_id, updates)
+
 
 @st.dialog("Entry Details", width="large")
 def _entry_detail_dialog(row_id: int, conn):
@@ -147,15 +171,21 @@ def _entry_detail_dialog(row_id: int, conn):
                     }),
                     hide_index=True, width='stretch',
                 )
-                t1, t2, t3 = st.columns(3)
-                _paid_amt = pkgs.loc[pkgs["status"] == "Claim Paid", "approved_amount"].sum()
-                t1.metric("Total Approved",  fmt_inr(pkgs["approved_amount"].sum()))
-                t2.metric("Total Paid",      fmt_inr(_paid_amt))
-                t3.metric("Received (−TDS)", fmt_inr(_paid_amt * 0.9))
+                _bill_total = pkgs["pkg_rate"].sum()
+                _paid_amt   = pkgs.loc[pkgs["status"] == "Claim Paid", "approved_amount"].sum()
+                t1, t2, t3, t4 = st.columns(4)
+                t1.metric("Bill Total",      fmt_inr(_bill_total))
+                t2.metric("Total Approved",  fmt_inr(pkgs["approved_amount"].sum()))
+                t3.metric("Total Paid",      fmt_inr(_paid_amt))
+                t4.metric("Received (−TDS)", fmt_inr(_paid_amt * 0.9))
             st.divider()
-            # on_click fires before the fragment reruns, avoiding the two-click bug
-            # that occurs when buttons are inside non-default tabs in Streamlit 1.55
-            st.button(
+            _ba1, _ba2 = st.columns(2)
+            def _auto_detect_status():
+                inferred = db.infer_maa_status(conn, tid)
+                if inferred:
+                    db.update_doctor_expense(conn, row_id, {"maa_status": inferred})
+            _ba1.button("🔄 Auto-detect Status", key="d_autodetect", on_click=_auto_detect_status)
+            _ba2.button(
                 "🔗 Unlink TID", key="d_unlink",
                 on_click=db.update_doctor_expense,
                 args=(conn, row_id, {"tid": None}),
@@ -177,8 +207,8 @@ def _entry_detail_dialog(row_id: int, conn):
                     chosen = candidates[idx]
                     st.button(
                         "🔗 Link to this admission", type="primary", key="d_link",
-                        on_click=db.update_doctor_expense,
-                        args=(conn, row_id, {"tid": chosen["tid"]}),
+                        on_click=_link_and_infer_status,
+                        args=(conn, row_id, chosen["tid"]),
                     )
                 else:
                     st.warning("No unlinked admissions found. Try expanding to ±1 month.")
