@@ -594,3 +594,63 @@ def search_claims_for_matching(
     cols = ["tid", "patient_name", "date_of_admission", "date_of_discharge", "maa_paid", "status"]
     return [dict(zip(cols, r)) for r in rows]
 
+
+# ── Doctor Share write operations ─────────────────────────────────────────────
+
+def save_doctor_expense(
+    conn: sqlite3.Connection,
+    month: str,
+    patient_name: str,
+    admission_date: str,
+    hosp_ex: float = 0.0,
+    pharma_ex: float = 0.0,
+    dialysis_ex: float = 0.0,
+    doctor_pct: float = 0.4,
+    doctor_flat: float | None = None,
+    comments: str | None = None,
+    maa_status: str | None = None,
+    tid: str | None = None,
+) -> int:
+    """Insert a new doctor_expenses row. Returns the new row id."""
+    cursor = conn.execute(
+        """INSERT INTO doctor_expenses
+               (tid, patient_name, admission_date, month,
+                hosp_ex, pharma_ex, dialysis_ex, doctor_pct, doctor_flat,
+                comments, maa_status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (tid, patient_name, admission_date, month,
+         hosp_ex, pharma_ex, dialysis_ex, doctor_pct, doctor_flat,
+         comments, maa_status),
+    )
+    conn.commit()
+    return cursor.lastrowid
+
+
+def update_doctor_expense(conn: sqlite3.Connection, id: int, fields: dict) -> None:
+    """Update mutable fields on a doctor_expenses row. Allowed keys: hosp_ex, pharma_ex, dialysis_ex, doctor_pct, doctor_flat, comments."""
+    allowed = {"hosp_ex", "pharma_ex", "dialysis_ex", "doctor_pct", "doctor_flat", "comments"}
+    updates = {k: v for k, v in fields.items() if k in allowed}
+    if not updates:
+        return
+    set_clause = ", ".join(f"{k} = ?" for k in updates)
+    conn.execute(
+        f"UPDATE doctor_expenses SET {set_clause}, updated_at = datetime('now') WHERE id = ?",
+        list(updates.values()) + [id],
+    )
+    conn.commit()
+
+
+def delete_doctor_expense(conn: sqlite3.Connection, id: int) -> None:
+    conn.execute("DELETE FROM doctor_expenses WHERE id = ?", (id,))
+    conn.commit()
+
+
+def mark_doctor_paid(conn: sqlite3.Connection, ids: list[int], payment_month: str) -> None:
+    """Bulk-mark doctor_expenses rows as paid to doctor."""
+    placeholders = ",".join("?" for _ in ids)
+    conn.execute(
+        f"UPDATE doctor_expenses SET doctor_paid = 1, doctor_payment_month = ?, updated_at = datetime('now') WHERE id IN ({placeholders})",
+        [payment_month] + ids,
+    )
+    conn.commit()
+

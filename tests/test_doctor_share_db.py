@@ -137,3 +137,71 @@ def test_search_claims_excludes_already_matched(mem_db_with_claims):
     conn.commit()
     results = db.search_claims_for_matching(conn, "ravi", "2025-06", expand=False)
     assert len(results) == 0
+
+
+def test_save_doctor_expense_maa(mem_db_with_claims):
+    conn = mem_db_with_claims
+    row_id = db.save_doctor_expense(
+        conn, month="2025-06", patient_name="Ravi Kumar",
+        admission_date="2025-06-15", hosp_ex=500.0, pharma_ex=1000.0, dialysis_ex=0.0,
+        doctor_pct=0.4, doctor_flat=None, comments="Test", maa_status="Claim Paid", tid="TID001",
+    )
+    assert isinstance(row_id, int)
+    row = conn.execute(
+        "SELECT tid, hosp_ex, pharma_ex, doctor_pct FROM doctor_expenses WHERE id=?", (row_id,)
+    ).fetchone()
+    assert row == ("TID001", 500.0, 1000.0, 0.4)
+
+
+def test_save_doctor_expense_non_maa(mem_db):
+    row_id = db.save_doctor_expense(
+        mem_db, month="2025-06", patient_name="Cash Patient",
+        admission_date="2025-06-20", doctor_flat=3000.0,
+    )
+    assert isinstance(row_id, int)
+    row = mem_db.execute(
+        "SELECT tid, doctor_flat FROM doctor_expenses WHERE id=?", (row_id,)
+    ).fetchone()
+    assert row == (None, 3000.0)
+
+
+def test_update_doctor_expense(mem_db):
+    conn = mem_db
+    conn.execute(
+        "INSERT INTO doctor_expenses (tid, patient_name, admission_date, month, hosp_ex) VALUES (?, ?, ?, ?, ?)",
+        ("T001", "Patient A", "2025-06-01", "2025-06", 100.0),
+    )
+    conn.commit()
+    row_id = conn.execute("SELECT id FROM doctor_expenses").fetchone()[0]
+    db.update_doctor_expense(conn, row_id, {"hosp_ex": 200.0, "comments": "Updated"})
+    row = conn.execute(
+        "SELECT hosp_ex, comments FROM doctor_expenses WHERE id=?", (row_id,)
+    ).fetchone()
+    assert row == (200.0, "Updated")
+
+
+def test_delete_doctor_expense(mem_db):
+    conn = mem_db
+    conn.execute(
+        "INSERT INTO doctor_expenses (tid, patient_name, admission_date, month) VALUES (?, ?, ?, ?)",
+        ("T001", "Patient A", "2025-06-01", "2025-06"),
+    )
+    conn.commit()
+    row_id = conn.execute("SELECT id FROM doctor_expenses").fetchone()[0]
+    db.delete_doctor_expense(conn, row_id)
+    count = conn.execute("SELECT COUNT(*) FROM doctor_expenses").fetchone()[0]
+    assert count == 0
+
+
+def test_mark_doctor_paid(mem_db):
+    conn = mem_db
+    conn.executemany(
+        "INSERT INTO doctor_expenses (tid, patient_name, admission_date, month) VALUES (?, ?, ?, ?)",
+        [("T001", "P1", "2025-06-01", "2025-06"), ("T002", "P2", "2025-06-02", "2025-06")],
+    )
+    conn.commit()
+    ids = [r[0] for r in conn.execute("SELECT id FROM doctor_expenses").fetchall()]
+    db.mark_doctor_paid(conn, ids, "2025-06")
+    rows = conn.execute("SELECT doctor_paid, doctor_payment_month FROM doctor_expenses").fetchall()
+    assert all(r[0] == 1 for r in rows)
+    assert all(r[1] == "2025-06" for r in rows)
