@@ -205,3 +205,16 @@ def test_mark_doctor_paid(mem_db):
     rows = conn.execute("SELECT doctor_paid, doctor_payment_month FROM doctor_expenses").fetchall()
     assert all(r[0] == 1 for r in rows)
     assert all(r[1] == "2025-06" for r in rows)
+
+
+def test_update_doctor_expense_disallowed_key(mem_db):
+    conn = mem_db
+    conn.execute(
+        "INSERT INTO doctor_expenses (tid, patient_name, admission_date, month, maa_status) VALUES (?, ?, ?, ?, ?)",
+        ("T001", "Patient A", "2025-06-01", "2025-06", "Claim Paid"),
+    )
+    conn.commit()
+    row_id = conn.execute("SELECT id FROM doctor_expenses").fetchone()[0]
+    db.update_doctor_expense(conn, row_id, {"maa_status": "Hacked"})
+    row = conn.execute("SELECT maa_status FROM doctor_expenses WHERE id=?", (row_id,)).fetchone()
+    assert row[0] == "Claim Paid"

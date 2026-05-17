@@ -626,7 +626,7 @@ def save_doctor_expense(
     return cursor.lastrowid
 
 
-def update_doctor_expense(conn: sqlite3.Connection, id: int, fields: dict) -> None:
+def update_doctor_expense(conn: sqlite3.Connection, row_id: int, fields: dict) -> None:
     """Update mutable fields on a doctor_expenses row. Allowed keys: hosp_ex, pharma_ex, dialysis_ex, doctor_pct, doctor_flat, comments."""
     allowed = {"hosp_ex", "pharma_ex", "dialysis_ex", "doctor_pct", "doctor_flat", "comments"}
     updates = {k: v for k, v in fields.items() if k in allowed}
@@ -635,18 +635,20 @@ def update_doctor_expense(conn: sqlite3.Connection, id: int, fields: dict) -> No
     set_clause = ", ".join(f"{k} = ?" for k in updates)
     conn.execute(
         f"UPDATE doctor_expenses SET {set_clause}, updated_at = datetime('now') WHERE id = ?",
-        list(updates.values()) + [id],
+        list(updates.values()) + [row_id],
     )
     conn.commit()
 
 
-def delete_doctor_expense(conn: sqlite3.Connection, id: int) -> None:
-    conn.execute("DELETE FROM doctor_expenses WHERE id = ?", (id,))
+def delete_doctor_expense(conn: sqlite3.Connection, row_id: int) -> None:
+    conn.execute("DELETE FROM doctor_expenses WHERE id = ?", (row_id,))
     conn.commit()
 
 
 def mark_doctor_paid(conn: sqlite3.Connection, ids: list[int], payment_month: str) -> None:
     """Bulk-mark doctor_expenses rows as paid to doctor."""
+    if not ids:
+        return
     placeholders = ",".join("?" for _ in ids)
     conn.execute(
         f"UPDATE doctor_expenses SET doctor_paid = 1, doctor_payment_month = ?, updated_at = datetime('now') WHERE id IN ({placeholders})",
