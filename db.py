@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS claims_hash (
 DOCTOR_EXPENSES_DDL = """
 CREATE TABLE IF NOT EXISTS doctor_expenses (
     id                   INTEGER PRIMARY KEY AUTOINCREMENT,
-    tid                  TEXT UNIQUE,
+    tid                  TEXT,
     patient_name         TEXT,
     admission_date       TEXT,
     month                TEXT NOT NULL,
@@ -42,7 +42,8 @@ CREATE TABLE IF NOT EXISTS doctor_expenses (
     doctor_paid          INTEGER DEFAULT 0,
     doctor_payment_month TEXT,
     created_at           TEXT DEFAULT CURRENT_TIMESTAMP,
-    updated_at           TEXT DEFAULT CURRENT_TIMESTAMP
+    updated_at           TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (tid, month)
 );
 """
 
