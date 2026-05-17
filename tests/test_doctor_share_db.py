@@ -208,13 +208,15 @@ def test_mark_doctor_paid(mem_db):
 
 
 def test_update_doctor_expense_disallowed_key(mem_db):
+    """created_at and doctor_paid are not in the allowlist — must not be writable."""
     conn = mem_db
     conn.execute(
-        "INSERT INTO doctor_expenses (tid, patient_name, admission_date, month, maa_status) VALUES (?, ?, ?, ?, ?)",
-        ("T001", "Patient A", "2025-06-01", "2025-06", "Claim Paid"),
+        "INSERT INTO doctor_expenses (tid, patient_name, admission_date, month, doctor_paid) VALUES (?, ?, ?, ?, ?)",
+        ("T001", "Patient A", "2025-06-01", "2025-06", 0),
     )
     conn.commit()
     row_id = conn.execute("SELECT id FROM doctor_expenses").fetchone()[0]
-    db.update_doctor_expense(conn, row_id, {"maa_status": "Hacked"})
-    row = conn.execute("SELECT maa_status FROM doctor_expenses WHERE id=?", (row_id,)).fetchone()
-    assert row[0] == "Claim Paid"
+    db.update_doctor_expense(conn, row_id, {"doctor_paid": 1, "created_at": "1970-01-01"})
+    row = conn.execute("SELECT doctor_paid, created_at FROM doctor_expenses WHERE id=?", (row_id,)).fetchone()
+    assert row[0] == 0, "doctor_paid must not be updated via update_doctor_expense"
+    assert row[1] != "1970-01-01", "created_at must not be updated via update_doctor_expense"
