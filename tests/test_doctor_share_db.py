@@ -101,6 +101,20 @@ def test_get_doctor_expenses_non_maa(mem_db):
     assert pd.isna(row["hospital_share"])
 
 
+def test_get_doctor_expenses_non_maa_no_flat(mem_db):
+    mem_db.execute(
+        """INSERT INTO doctor_expenses (tid, patient_name, admission_date, month)
+           VALUES (NULL, ?, ?, ?)""",
+        ("Pending Patient", "2025-06-20", "2025-06"),
+    )
+    mem_db.commit()
+    df = db.get_doctor_expenses(mem_db, "2025-06")
+    row = df.iloc[0]
+    assert pd.isna(row["maa_payment"])
+    assert pd.isna(row["doctor_share"])
+    assert pd.isna(row["hospital_share"])
+
+
 def test_search_claims_for_matching_exact_month(mem_db_with_claims):
     results = db.search_claims_for_matching(mem_db_with_claims, "ravi", "2025-06", expand=False)
     assert len(results) == 1

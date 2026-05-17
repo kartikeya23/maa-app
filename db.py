@@ -6,7 +6,7 @@ Schema, upsert, and query functions backed by SQLite.
 import hashlib
 import json
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -539,7 +539,11 @@ def get_doctor_expenses(conn: sqlite3.Connection, month: str) -> pd.DataFrame:
     df["doctor_share"] = df.apply(
         lambda r: r["doctor_flat"]
         if pd.notna(r["doctor_flat"])
-        else r["doctor_pct"] * (r["maa_payment"] - r["total_ex"]),
+        else (
+            r["doctor_pct"] * (r["maa_payment"] - r["total_ex"])
+            if pd.notna(r["maa_payment"])
+            else None
+        ),
         axis=1,
     )
     df["hospital_share"] = df.apply(
@@ -564,7 +568,6 @@ def search_claims_for_matching(
     """
     months = [month]
     if expand:
-        from datetime import timedelta
         dt = datetime.strptime(month + "-01", "%Y-%m-%d")
         prev = (dt.replace(day=1) - timedelta(days=1)).strftime("%Y-%m")
         nxt = (dt.replace(day=28) + timedelta(days=4)).strftime("%Y-%m")
@@ -572,7 +575,7 @@ def search_claims_for_matching(
 
     placeholders = ",".join("?" for _ in months)
     sql = f"""
-        SELECT DISTINCT
+        SELECT
             tid,
             patient_name,
             date_of_admission,
