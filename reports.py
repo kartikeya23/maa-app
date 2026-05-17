@@ -66,11 +66,50 @@ FY_COLS = [
     ("Outstanding",     "outstanding",     RUPEE_FMT),
 ]
 
-AMOUNT_COLS = {"total_approved", "total_paid", "total_received", "outstanding",
-               "approved_amount", "paid_amount", "pkg_rate"}
-SUMMABLE_COLS = {"total_approved", "total_paid", "total_received", "outstanding",
-                 "approved_amount", "paid_amount", "packages",
-                 "admissions", "queries", "query_raised", "days"}
+AMOUNT_COLS = {
+    "total_approved", "total_paid", "total_received", "outstanding",
+    "approved_amount", "paid_amount", "pkg_rate",
+    "hosp_ex", "pharma_ex", "dialysis_ex", "total_ex",
+    "maa_payment", "doctor_share", "hospital_share",
+}
+SUMMABLE_COLS = {
+    "total_approved", "total_paid", "total_received", "outstanding",
+    "approved_amount", "paid_amount", "packages",
+    "admissions", "queries", "query_raised", "days",
+    "hosp_ex", "pharma_ex", "dialysis_ex", "total_ex",
+    "maa_payment", "doctor_share", "hospital_share",
+}
+
+DOCTOR_INTERNAL_COLS = [
+    ("No.",               "no",                   NUMBER_FMT),
+    ("Patient Name",      "patient_name",         None),
+    ("Admission Date",    "admission_date",        DATE_FMT),
+    ("Hosp Ex",           "hosp_ex",              RUPEE_FMT),
+    ("Pharma Ex",         "pharma_ex",            RUPEE_FMT),
+    ("Dialysis Ex",       "dialysis_ex",          RUPEE_FMT),
+    ("Total Ex",          "total_ex",             RUPEE_FMT),
+    ("MAA Payment",       "maa_payment",          RUPEE_FMT),
+    ("Doctor Share",      "doctor_share",         RUPEE_FMT),
+    ("Hospital Share",    "hospital_share",       RUPEE_FMT),
+    ("MAA Status",        "maa_status",           None),
+    ("Doctor Paid",       "doctor_paid_label",    None),
+    ("Dr Payment Month",  "doctor_payment_month", None),
+    ("Comments",          "comments",             None),
+]
+
+DOCTOR_COPY_COLS = [
+    ("No.",               "no",                   NUMBER_FMT),
+    ("Patient Name",      "patient_name",         None),
+    ("Admission Date",    "admission_date",        DATE_FMT),
+    ("Hosp Ex",           "hosp_ex",              RUPEE_FMT),
+    ("Pharma Ex",         "pharma_ex",            RUPEE_FMT),
+    ("Dialysis Ex",       "dialysis_ex",          RUPEE_FMT),
+    ("Total Ex",          "total_ex",             RUPEE_FMT),
+    ("MAA Payment",       "maa_payment",          RUPEE_FMT),
+    ("Doctor Share",      "doctor_share",         RUPEE_FMT),
+    ("Hospital Share",    "hospital_share",       RUPEE_FMT),
+    ("Comments",          "comments",             None),
+]
 
 
 def _auto_width(ws):
@@ -309,6 +348,33 @@ def generate_report(df: pd.DataFrame, title: str, report_type: str) -> bytes:
     else:
         raise ValueError(f"Unknown report_type: {report_type}")
 
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def _prepare_doctor_df(df: pd.DataFrame) -> pd.DataFrame:
+    out = df.copy().reset_index(drop=True)
+    out["no"] = range(1, len(out) + 1)
+    out["doctor_paid_label"] = out["doctor_paid"].apply(lambda x: "Yes" if x else "No")
+    return out
+
+
+def generate_doctor_internal(df: pd.DataFrame, month_label: str) -> bytes:
+    """Full internal report: all columns including payment tracking."""
+    wb = Workbook()
+    ws = wb.active
+    _write_sheet(ws, _prepare_doctor_df(df), DOCTOR_INTERNAL_COLS, f"{month_label} (Internal)")
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def generate_doctor_copy(df: pd.DataFrame, month_label: str) -> bytes:
+    """Doctor-facing report: no payment tracking columns."""
+    wb = Workbook()
+    ws = wb.active
+    _write_sheet(ws, _prepare_doctor_df(df), DOCTOR_COPY_COLS, f"{month_label} (Dr Copy)")
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
