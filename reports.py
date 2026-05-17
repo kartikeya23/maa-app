@@ -356,12 +356,16 @@ def generate_report(df: pd.DataFrame, title: str, report_type: str) -> bytes:
 def _prepare_doctor_df(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy().reset_index(drop=True)
     out["no"] = range(1, len(out) + 1)
+    # NULL and 0 both map to "No" — intentional, NULL means payment not yet recorded
     out["doctor_paid_label"] = out["doctor_paid"].apply(lambda x: "Yes" if x else "No")
     return out
 
 
 def generate_doctor_internal(df: pd.DataFrame, month_label: str) -> bytes:
-    """Full internal report: all columns including payment tracking."""
+    """Full internal report: all columns including payment tracking.
+
+    month_label should be short (e.g. "June 2025") — sheet titles are truncated to 31 chars.
+    """
     wb = Workbook()
     ws = wb.active
     _write_sheet(ws, _prepare_doctor_df(df), DOCTOR_INTERNAL_COLS, f"{month_label} (Internal)")
