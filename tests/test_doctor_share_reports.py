@@ -68,4 +68,5 @@ def test_report_row_count(sample_entries):
     wb = load_workbook(io.BytesIO(reports.generate_doctor_internal(sample_entries, "June 2025")))
     ws = wb.active
     # header row + 2 data rows + 1 total row = 4
-    assert ws.max_row == 4
+    # + 1 blank spacer + 1 outstanding summary header + 1 "Total Unpaid" subtotal row = 7
+    assert ws.max_row == 7
