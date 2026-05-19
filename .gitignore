@@ -1,5 +1,59 @@
+# Python virtual environments
 .venv/
+venv/
+ENV/
+env/
+
+# Python bytecode and caches
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+
+# Database files
+*.sqlite3
+*.db
 maa.db
+*.sqlite
+
+# Logs and exports
+*.log
 *.csv
+
+# macOS files
+.DS_STORE
+
+# Python environment tools
+.python-version
+pip-wheel-metadata/
+
+# Test and coverage outputs
+htmlcov/
+.coverage
+.coverage.*
+.cache
+.pytest_cache/
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+
+# Static analysis caches
+.pyre/
+.mypy_cache/
+.dmypy.json
+.pytype/
+
+# IDE and editor settings
+.idea/
+.vscode/
+*.sublime-workspace
+*.sublime-project
+
+# Swap files and temporary files
+*.swp
+*~
+
+# Windows files
+Thumbs.db
