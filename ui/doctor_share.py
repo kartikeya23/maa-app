@@ -259,10 +259,18 @@ def render(conn) -> None:
 
     with st.expander("➕ Add Entry", expanded=not available_months):
         if available_months:
-            add_month = st.selectbox(
-                "Add to month", available_months, key="add_entry_month",
+            _NEW_MONTH_SENTINEL = "➕ New month…"
+            _month_opts = available_months + [_NEW_MONTH_SENTINEL]
+            _month_sel = st.selectbox(
+                "Add to month", _month_opts, key="add_entry_month",
                 help="Which month this entry belongs to",
             )
+            if _month_sel == _NEW_MONTH_SENTINEL:
+                add_month = st.text_input(
+                    "New month (YYYY-MM)", key="add_entry_new_month", placeholder="2025-06"
+                )
+            else:
+                add_month = _month_sel
         else:
             add_month = st.text_input("Month (YYYY-MM)", key="add_entry_month", placeholder="2025-06")
 
