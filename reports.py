@@ -135,6 +135,7 @@ def _auto_width(ws):
 
 def _write_sheet(ws, df: pd.DataFrame, col_defs: list[tuple], title: str,
                  status_col_idx: int | None = None,
+                 color_by_maa_status: bool = False,
                  header_fill=None, header_font=None):
     """Write headers + data + summary row into ws."""
     ws.title = title[:31]  # Excel sheet name limit
@@ -168,7 +169,15 @@ def _write_sheet(ws, df: pd.DataFrame, col_defs: list[tuple], title: str,
 
         # Row fill: status-based overrides alternating
         alt_fill = ROW_FILL_EVEN if ri % 2 == 0 else ROW_FILL_ODD
-        if status_col_idx is not None:
+        if color_by_maa_status:
+            maa_status = str(row.get("maa_status", "") or "")
+            if maa_status == "Claim Paid":
+                row_fill = GREEN_FILL
+            elif maa_status == "Rejected":
+                row_fill = _REJECTED_FILL
+            else:
+                row_fill = alt_fill
+        elif status_col_idx is not None:
             statuses_val = str(row.get("statuses", "") or "")
             statuses = {s.strip().lower() for s in statuses_val.split(",")}
             queries  = row.get("queries", 0) or 0
@@ -378,11 +387,14 @@ _DOCTOR_NUMERIC_COLS = {4: "hosp_ex", 5: "pharma_ex", 6: "dialysis_ex",
                         10: "hospital_share"}
 
 
-def _write_doctor_status_totals(ws, df: pd.DataFrame) -> None:
+def _write_doctor_status_totals(ws, df: pd.DataFrame, n_cols: int | None = None) -> None:
     """Append status-wise subtotals for doctor-not-yet-paid entries."""
     unpaid = df[df["doctor_paid"] == 0].copy()
     if unpaid.empty:
         return
+
+    if n_cols is None:
+        n_cols = len(DOCTOR_INTERNAL_COLS)
 
     start_row = ws.max_row + 2
 
@@ -396,7 +408,6 @@ def _write_doctor_status_totals(ws, df: pd.DataFrame) -> None:
         ("Rejected",     unpaid[unpaid["maa_status"] == "Rejected"],     _REJECTED_FILL),
         ("Total Unpaid", unpaid,                                         TOTAL_FILL),
     ]
-    n_cols = len(DOCTOR_INTERNAL_COLS)
 
     for label, sub, fill in sections:
         if sub.empty:
@@ -423,9 +434,11 @@ def generate_doctor_internal(df: pd.DataFrame, month_label: str) -> bytes:
     """
     wb = Workbook()
     ws = wb.active
-    _write_sheet(ws, _prepare_doctor_df(df), DOCTOR_INTERNAL_COLS, f"{month_label} (Internal)")
-    _write_doctor_status_totals(ws, df)
+    _write_sheet(ws, _prepare_doctor_df(df), DOCTOR_INTERNAL_COLS, f"{month_label} (Internal)",
+                 color_by_maa_status=True)
+    _write_doctor_status_totals(ws, df, n_cols=len(DOCTOR_INTERNAL_COLS))
     _auto_width(ws)
+    ws.column_dimensions['A'].width = min(ws.column_dimensions['A'].width, 20)
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
@@ -437,8 +450,12 @@ def generate_doctor_copy(df: pd.DataFrame, month_label: str) -> bytes:
     ws = wb.active
     _write_sheet(
         ws, _prepare_doctor_df(df), DOCTOR_COPY_COLS, f"{month_label} (Dr Copy)",
+        color_by_maa_status=True,
         header_fill=DOCTOR_COPY_HEADER_FILL, header_font=DOCTOR_COPY_HEADER_FONT,
     )
+    _write_doctor_status_totals(ws, df, n_cols=len(DOCTOR_COPY_COLS))
+    _auto_width(ws)
+    ws.column_dimensions['A'].width = min(ws.column_dimensions['A'].width, 20)
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
