@@ -111,6 +111,7 @@ DOCTOR_COPY_COLS = [
     ("MAA Payment",       "maa_payment",          RUPEE_FMT),
     ("Doctor Share",      "doctor_share",         RUPEE_FMT),
     ("Hospital Share",    "hospital_share",       RUPEE_FMT),
+    ("MAA Status",        "maa_status",           None),
     ("Comments",          "comments",             None),
 ]
 
@@ -136,6 +137,7 @@ def _auto_width(ws):
 def _write_sheet(ws, df: pd.DataFrame, col_defs: list[tuple], title: str,
                  status_col_idx: int | None = None,
                  color_by_maa_status: bool = False,
+                 freeze_panes: str = "A2",
                  header_fill=None, header_font=None):
     """Write headers + data + summary row into ws."""
     ws.title = title[:31]  # Excel sheet name limit
@@ -155,7 +157,7 @@ def _write_sheet(ws, df: pd.DataFrame, col_defs: list[tuple], title: str,
         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
     ws.row_dimensions[1].height = 28
-    ws.freeze_panes = "A2"
+    ws.freeze_panes = freeze_panes
 
     # Data rows
     for ri, (_, row) in enumerate(df.iterrows(), 2):
@@ -239,6 +241,27 @@ def month_label(ym: str) -> str:
         return f"{_MONTH_NAMES.get(month, month)} {year}"
     except Exception:
         return ym
+
+
+def compact_month_range(months: list[str]) -> str:
+    """Compact label suitable for Excel sheet names (stays well under 31 chars).
+
+    ['2025-04']                          → 'April 2025'
+    ['2025-04', '2025-05', '2025-06']    → 'Apr–Jun 2025'
+    ['2024-12', '2025-01']               → 'Dec 2024–Jan 2025'
+    """
+    if not months:
+        return ""
+    srt = sorted(months)
+    if len(srt) == 1:
+        return month_label(srt[0])
+    first_yr, first_mo = srt[0].split("-")
+    last_yr,  last_mo  = srt[-1].split("-")
+    first_abbr = _MONTH_NAMES.get(first_mo, first_mo)[:3]
+    last_abbr  = _MONTH_NAMES.get(last_mo,  last_mo)[:3]
+    if first_yr == last_yr:
+        return f"{first_abbr}–{last_abbr} {first_yr}"
+    return f"{first_abbr} {first_yr}–{last_abbr} {last_yr}"
 
 
 def _generate_detail_report(df: pd.DataFrame, sheet_title: str) -> bytes:
@@ -401,6 +424,8 @@ def _write_doctor_status_totals(ws, df: pd.DataFrame, n_cols: int | None = None)
     hdr = ws.cell(row=start_row, column=1,
                   value="Outstanding Summary — Doctor Not Yet Paid")
     hdr.font = _SECTION_HDR_FONT
+    for ci in range(1, n_cols + 1):
+        ws.cell(row=start_row, column=ci).fill = TOTAL_FILL
     start_row += 1
 
     sections = [
@@ -435,7 +460,7 @@ def generate_doctor_internal(df: pd.DataFrame, month_label: str) -> bytes:
     wb = Workbook()
     ws = wb.active
     _write_sheet(ws, _prepare_doctor_df(df), DOCTOR_INTERNAL_COLS, f"{month_label} (Internal)",
-                 color_by_maa_status=True)
+                 color_by_maa_status=True, freeze_panes="B2")
     _write_doctor_status_totals(ws, df, n_cols=len(DOCTOR_INTERNAL_COLS))
     _auto_width(ws)
     ws.column_dimensions['A'].width = min(ws.column_dimensions['A'].width, 20)
@@ -450,7 +475,7 @@ def generate_doctor_copy(df: pd.DataFrame, month_label: str) -> bytes:
     ws = wb.active
     _write_sheet(
         ws, _prepare_doctor_df(df), DOCTOR_COPY_COLS, f"{month_label} (Dr Copy)",
-        color_by_maa_status=True,
+        color_by_maa_status=True, freeze_panes="B2",
         header_fill=DOCTOR_COPY_HEADER_FILL, header_font=DOCTOR_COPY_HEADER_FONT,
     )
     _write_doctor_status_totals(ws, df, n_cols=len(DOCTOR_COPY_COLS))
