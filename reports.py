@@ -216,7 +216,7 @@ SUBTOTAL_FILL = StylePatternFill(fill_type="solid", fgColor="D9E1F2")
 SUBTOTAL_FONT = Font(bold=True, name="Calibri")
 
 
-def _month_label(ym: str) -> str:
+def month_label(ym: str) -> str:
     """'2025-04' → 'April 2025'"""
     try:
         year, month = ym.split("-")
@@ -249,7 +249,7 @@ def _generate_detail_report(df: pd.DataFrame, sheet_title: str) -> bytes:
     grand_paid = grand_received = grand_approved = grand_rejected = 0.0
 
     for month_ym, group in df.groupby("month", sort=False):
-        label = _month_label(month_ym)
+        label = month_label(month_ym)
 
         # Month header row
         for ci in range(1, num_cols + 1):
