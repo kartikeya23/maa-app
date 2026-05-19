@@ -137,10 +137,10 @@ def _entry_detail_dialog(row_id: int, conn):
             pkgs = db.query_packages_for_tid(conn, tid)
             if not pkgs.empty:
                 st.dataframe(
-                    pkgs[["pkg_name", "pkg_speciality_name", "approved_amount",
+                    pkgs[["pkg_name", "pkg_speciality_name", "approved_amount", "paid_amount",
                            "status", "payment_date"]].rename(columns={
                         "pkg_name": "Package", "pkg_speciality_name": "Speciality",
-                        "approved_amount": "Approved ₹",
+                        "approved_amount": "Approved ₹", "paid_amount": "Paid ₹",
                         "status": "Status", "payment_date": "Payment Date",
                     }),
                     hide_index=True, width='stretch',
