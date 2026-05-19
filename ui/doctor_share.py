@@ -470,31 +470,55 @@ def render(conn) -> None:
 
         if selected_ids:
             n = len(selected_ids)
-            act_cols = st.columns([2, 2, 1])
-            with act_cols[0]:
+            _ba1, _ba2, _ba3, _ba4 = st.columns([2.5, 1.5, 2.5, 1])
+
+            with _ba1:
                 default_pay = selected_months[-1] if len(selected_months) == 1 else ""
                 pay_month_input = st.text_input(
-                    "Payment month", value=default_pay,
+                    "Payment month (YYYY-MM)", value=default_pay,
                     placeholder="YYYY-MM", key="pay_month_input",
                 )
-            with act_cols[1]:
-                st.write("")
-                st.write("")
-                if st.button(f"✔ Mark {n} Paid", width="stretch"):
+                if st.button(f"✔ Mark {n} Paid", width="stretch", key="bulk_mark_paid"):
                     if pay_month_input:
                         db.mark_doctor_paid(conn, [int(i) for i in selected_ids], pay_month_input)
                         st.success(f"Marked {n} row(s) paid ({pay_month_input}).")
                         st.rerun()
                     else:
                         st.error("Enter a payment month first.")
-            with act_cols[2]:
+
+            with _ba2:
+                st.write("")
+                st.write("")
+                st.write("")
+                if st.button(f"✖ Unmark {n}", width="stretch", key="bulk_unmark_paid",
+                             help=f"Unmark {n} selected {'entry' if n==1 else 'entries'} as paid"):
+                    db.unmark_doctor_paid(conn, [int(i) for i in selected_ids])
+                    st.success(f"Unmarked {n} row(s).")
+                    st.rerun()
+
+            with _ba3:
+                move_month_input = st.text_input(
+                    "Move to month (YYYY-MM)", placeholder="YYYY-MM", key="move_month_input",
+                )
+                if st.button(f"📅 Change Month ({n})", width="stretch", key="bulk_change_month"):
+                    if not move_month_input or not re.fullmatch(r"\d{4}-\d{2}", move_month_input):
+                        st.error("Enter a valid month (YYYY-MM) before changing.")
+                    else:
+                        for _id in selected_ids:
+                            db.update_doctor_expense(conn, int(_id), {"month": move_month_input})
+                        st.success(f"Moved {n} row(s) to {move_month_input}.")
+                        st.rerun()
+
+            with _ba4:
+                st.write("")
                 st.write("")
                 st.write("")
                 if st.button(f"🗑 {n}", type="secondary", width="stretch",
-                             help=f"Delete {n} selected {'entry' if n==1 else 'entries'}"):
+                             help=f"Delete {n} selected {'entry' if n==1 else 'entries'}",
+                             key="bulk_delete"):
                     _confirm_delete_dialog([int(i) for i in selected_ids], conn)
         else:
-            st.caption("Click a patient name to open · check rows for bulk Mark Paid / Delete")
+            st.caption("Click a patient name to open · check rows for bulk actions")
 
         st.divider()
         m1, m2, m3, m4, m5 = st.columns(5)
