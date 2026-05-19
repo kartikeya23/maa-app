@@ -73,12 +73,23 @@ def _entry_detail_dialog(row_id: int, conn):
         cur_status = r["maa_status"] or ""
         if cur_status not in maa_status_opts:
             maa_status_opts.append(cur_status)
-        e1, e2 = st.columns(2)
-        new_maa_status = e1.selectbox("MAA Status", maa_status_opts,
+        new_maa_status = st.selectbox("MAA Status", maa_status_opts,
                                       index=maa_status_opts.index(cur_status), key="d_maa_status")
-        new_pay_month  = e2.text_input("Payment Month (YYYY-MM)",
-                                       value=r["doctor_payment_month"] or "", key="d_pay_month")
         new_comments   = st.text_input("Comments", value=r["comments"] or "", key="d_comments")
+
+        with st.expander("⚙️ Advanced"):
+            adv1, adv2 = st.columns(2)
+            new_filing_month = adv1.text_input(
+                "Filing Month (YYYY-MM)", value=str(r["month"]), key="d_filing_month",
+                help="Moves this entry to a different month bucket.",
+            )
+            new_doctor_paid = adv2.checkbox(
+                "Paid to Doctor", value=bool(r["doctor_paid"]), key="d_doctor_paid",
+            )
+            new_pay_month = st.text_input(
+                "Payment Month (YYYY-MM)", value=r["doctor_payment_month"] or "",
+                key="d_pay_month", help="Month in which payment was made to the doctor.",
+            )
 
         tot_ex = new_hosp + new_pharma + new_dialysis
         share  = new_flat if new_flat else (
@@ -104,11 +115,13 @@ def _entry_detail_dialog(row_id: int, conn):
                 "doctor_flat":          new_flat,
                 "comments":             new_comments or None,
                 "maa_status":           new_maa_status or None,
+                "month":                new_filing_month or None,
+                "doctor_paid":          1 if new_doctor_paid else 0,
                 "doctor_payment_month": new_pay_month or None,
             })
             for _k in ["d_patient_name", "d_admission_date", "d_hosp", "d_pharma",
                         "d_dialysis", "d_pct", "d_flat", "d_maa_status",
-                        "d_pay_month", "d_comments"]:
+                        "d_filing_month", "d_doctor_paid", "d_pay_month", "d_comments"]:
                 st.session_state.pop(_k, None)
             st.success("Saved.")
 
