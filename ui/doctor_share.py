@@ -304,14 +304,14 @@ def render(conn) -> None:
                 st.info(f"Selected: **{chosen['patient_name']}** (TID: {chosen['tid']}, Adm: {chosen['date_of_admission']})")
 
                 c1, c2, c3 = st.columns(3)
-                hosp_ex     = c1.number_input("Hospital Ex ₹",  min_value=0.0, step=100.0, key="ae_hosp")
-                pharma_ex   = c2.number_input("Pharmacy Ex ₹",  min_value=0.0, step=100.0, key="ae_pharma")
-                dialysis_ex = c3.number_input("Dialysis Ex ₹",  min_value=0.0, step=100.0, key="ae_dialysis")
+                hosp_ex     = c1.number_input("Hospital Ex ₹",  min_value=0, value=0, step=100, format="%d", key="ae_hosp")
+                pharma_ex   = c2.number_input("Pharmacy Ex ₹",  min_value=0, value=0, step=100, format="%d", key="ae_pharma")
+                dialysis_ex = c3.number_input("Dialysis Ex ₹",  min_value=0, value=0, step=100, format="%d", key="ae_dialysis")
                 doctor_pct_input = st.number_input(
                     "Doctor % (default 40%)", min_value=0.0, max_value=100.0,
                     value=40.0, step=5.0, key="ae_pct",
                 ) / 100.0
-                doctor_flat_raw = st.number_input("Flat override ₹ (0 = use %)", min_value=0.0, step=500.0, key="ae_flat")
+                doctor_flat_raw = st.number_input("Flat override ₹ (0 = use %)", min_value=0, value=0, step=500, format="%d", key="ae_flat")
                 comments_input  = st.text_input("Comments", key="ae_comments")
 
                 flat_val         = doctor_flat_raw if doctor_flat_raw > 0 else None
@@ -337,6 +337,9 @@ def render(conn) -> None:
                         maa_status=chosen["status"], tid=chosen["tid"],
                     )
                     st.success(f"Added entry for {chosen['patient_name']}.")
+                    for _k in ["ae_search", "ae_hosp", "ae_pharma", "ae_dialysis",
+                               "ae_pct", "ae_flat", "ae_comments", "expand_search"]:
+                        st.session_state.pop(_k, None)
                     st.rerun()
             elif search_name:
                 st.warning("No matching admissions found. Try a partial name or expand to ±1 month.")
@@ -345,10 +348,10 @@ def render(conn) -> None:
             nm_name     = st.text_input("Patient Name", key="nm_name")
             nm_date     = st.date_input("Admission Date", key="nm_date")
             c1, c2, c3  = st.columns(3)
-            nm_hosp     = c1.number_input("Hospital Ex ₹",  min_value=0.0, step=100.0, key="nm_hosp")
-            nm_pharma   = c2.number_input("Pharmacy Ex ₹",  min_value=0.0, step=100.0, key="nm_pharma")
-            nm_dialysis = c3.number_input("Dialysis Ex ₹",  min_value=0.0, step=100.0, key="nm_dialysis")
-            nm_share    = st.number_input("Doctor Share ₹", min_value=0.0, step=500.0,  key="nm_share")
+            nm_hosp     = c1.number_input("Hospital Ex ₹",  min_value=0, value=0, step=100, format="%d", key="nm_hosp")
+            nm_pharma   = c2.number_input("Pharmacy Ex ₹",  min_value=0, value=0, step=100, format="%d", key="nm_pharma")
+            nm_dialysis = c3.number_input("Dialysis Ex ₹",  min_value=0, value=0, step=100, format="%d", key="nm_dialysis")
+            nm_share    = st.number_input("Doctor Share ₹", min_value=0, value=0, step=500, format="%d", key="nm_share")
             nm_comments = st.text_input("Comments", key="nm_comments")
 
             if st.button("Save Entry", type="primary", key="nm_save"):
@@ -364,6 +367,9 @@ def render(conn) -> None:
                         doctor_flat=nm_share, comments=nm_comments or None, tid=None,
                     )
                     st.success(f"Added non-MAA entry for {nm_name}.")
+                    for _k in ["nm_name", "nm_date", "nm_hosp", "nm_pharma",
+                               "nm_dialysis", "nm_share", "nm_comments"]:
+                        st.session_state.pop(_k, None)
                     st.rerun()
 
     if not selected_months:
