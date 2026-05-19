@@ -15,6 +15,9 @@ from openpyxl.utils import get_column_letter
 HEADER_FILL = StylePatternFill(fill_type="solid", fgColor="1F3864")
 HEADER_FONT = Font(bold=True, color="FFFFFF", name="Calibri")
 
+DOCTOR_COPY_HEADER_FILL = StylePatternFill(fill_type="solid", fgColor="00695C")
+DOCTOR_COPY_HEADER_FONT = Font(bold=True, color="FFFFFF", name="Calibri")
+
 GREEN_FILL  = StylePatternFill(fill_type="solid", fgColor="C6EFCE")
 AMBER_FILL  = StylePatternFill(fill_type="solid", fgColor="FFEB9C")
 TOTAL_FILL  = StylePatternFill(fill_type="solid", fgColor="D9E1F2")
@@ -131,9 +134,13 @@ def _auto_width(ws):
 
 
 def _write_sheet(ws, df: pd.DataFrame, col_defs: list[tuple], title: str,
-                 status_col_idx: int | None = None):
+                 status_col_idx: int | None = None,
+                 header_fill=None, header_font=None):
     """Write headers + data + summary row into ws."""
     ws.title = title[:31]  # Excel sheet name limit
+
+    _hfill = header_fill if header_fill is not None else HEADER_FILL
+    _hfont = header_font if header_font is not None else HEADER_FONT
 
     headers = [c[0] for c in col_defs]
     db_keys = [c[1] for c in col_defs]
@@ -142,8 +149,8 @@ def _write_sheet(ws, df: pd.DataFrame, col_defs: list[tuple], title: str,
     # Header row
     for ci, hdr in enumerate(headers, 1):
         cell = ws.cell(row=1, column=ci, value=hdr)
-        cell.fill = HEADER_FILL
-        cell.font = HEADER_FONT
+        cell.fill = _hfill
+        cell.font = _hfont
         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
     ws.row_dimensions[1].height = 28
@@ -428,7 +435,10 @@ def generate_doctor_copy(df: pd.DataFrame, month_label: str) -> bytes:
     """Doctor-facing report: no payment tracking columns."""
     wb = Workbook()
     ws = wb.active
-    _write_sheet(ws, _prepare_doctor_df(df), DOCTOR_COPY_COLS, f"{month_label} (Dr Copy)")
+    _write_sheet(
+        ws, _prepare_doctor_df(df), DOCTOR_COPY_COLS, f"{month_label} (Dr Copy)",
+        header_fill=DOCTOR_COPY_HEADER_FILL, header_font=DOCTOR_COPY_HEADER_FONT,
+    )
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()

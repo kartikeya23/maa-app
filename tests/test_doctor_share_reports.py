@@ -70,3 +70,18 @@ def test_report_row_count(sample_entries):
     # header row + 2 data rows + 1 total row = 4
     # + 1 blank spacer + 1 outstanding summary header + 1 "Total Unpaid" subtotal row = 7
     assert ws.max_row == 7
+
+
+def test_generate_doctor_copy_header_is_teal(sample_entries):
+    wb = load_workbook(io.BytesIO(reports.generate_doctor_copy(sample_entries, "June 2025")))
+    ws = wb.active
+    # openpyxl returns ARGB; last 6 chars are the hex colour
+    header_fill = ws.cell(1, 1).fill.fgColor.rgb[-6:]
+    assert header_fill == "00695C", f"Expected teal 00695C, got {header_fill}"
+
+
+def test_generate_doctor_internal_header_is_navy(sample_entries):
+    wb = load_workbook(io.BytesIO(reports.generate_doctor_internal(sample_entries, "June 2025")))
+    ws = wb.active
+    header_fill = ws.cell(1, 1).fill.fgColor.rgb[-6:]
+    assert header_fill == "1F3864", f"Expected navy 1F3864, got {header_fill}"
