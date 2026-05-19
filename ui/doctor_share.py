@@ -440,7 +440,15 @@ def render(conn) -> None:
                 unsafe_allow_html=True,
             ); _ci += 1
             if _row["doctor_paid"] == 1:
-                _c[_ci].markdown("<div style='padding-top:4px;font-size:1rem'>🟢</div>", unsafe_allow_html=True)
+                _pay_mo = _row.get("doctor_payment_month") or ""
+                _pay_mo_html = (
+                    f"<div style='font-size:0.72rem;color:#999;line-height:1.2'>{_pay_mo}</div>"
+                    if _pay_mo else ""
+                )
+                _c[_ci].markdown(
+                    f"<div style='padding-top:4px;font-size:1rem'>🟢</div>{_pay_mo_html}",
+                    unsafe_allow_html=True,
+                )
             elif _status_val == "Claim Paid":
                 _c[_ci].markdown("<div style='padding-top:4px;font-size:1rem'>🟡</div>", unsafe_allow_html=True)
 
