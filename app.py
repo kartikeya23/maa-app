@@ -6,9 +6,9 @@ Run with: streamlit run app.py
 import streamlit as st
 
 import db
-from pages import admissions, dashboard, doctor_share
-from pages import ingest as ingest_page
-from pages import reports as reports_page
+from ui import admissions, dashboard, doctor_share
+from ui import ingest as ingest_page
+from ui import reports as reports_page
 
 st.set_page_config(
     page_title="MAA Records",
@@ -36,6 +36,7 @@ with st.sidebar:
             type="primary" if st.session_state["_page"] == _p else "secondary",
         ):
             st.session_state["_page"] = _p
+            st.rerun()
 
     st.divider()
     st.caption("CLINICAL")
@@ -44,6 +45,7 @@ with st.sidebar:
         type="primary" if st.session_state["_page"] == "Doctor Share" else "secondary",
     ):
         st.session_state["_page"] = "Doctor Share"
+        st.rerun()
 
 _PAGE_MAP = {
     "Dashboard":    dashboard,
