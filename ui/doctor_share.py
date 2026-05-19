@@ -63,15 +63,17 @@ def _entry_detail_dialog(row_id: int, conn):
         )
 
         c1, c2, c3 = st.columns(3)
-        new_hosp     = c1.number_input("Hospital Ex ₹",  value=float(r["hosp_ex"] or 0),     min_value=0.0, step=100.0, key="d_hosp")
-        new_pharma   = c2.number_input("Pharmacy Ex ₹",  value=float(r["pharma_ex"] or 0),   min_value=0.0, step=100.0, key="d_pharma")
-        new_dialysis = c3.number_input("Dialysis Ex ₹",  value=float(r["dialysis_ex"] or 0), min_value=0.0, step=100.0, key="d_dialysis")
+        new_hosp     = c1.number_input("Hospital Ex ₹",  value=float(r["hosp_ex"] or 0),     min_value=0.0, step=100.0, key="d_hosp",     help="Hospital expenses paid by the hospital (e.g. implants, consumables) — deducted before calculating doctor share.")
+        new_pharma   = c2.number_input("Pharmacy Ex ₹",  value=float(r["pharma_ex"] or 0),   min_value=0.0, step=100.0, key="d_pharma",   help="Pharmacy / medicine costs borne by the hospital — deducted before calculating doctor share.")
+        new_dialysis = c3.number_input("Dialysis Ex ₹",  value=float(r["dialysis_ex"] or 0), min_value=0.0, step=100.0, key="d_dialysis", help="Dialysis session costs borne by the hospital — deducted before calculating doctor share.")
 
         d1, d2 = st.columns(2)
         new_pct      = d1.number_input("Doctor %", value=float(r["doctor_pct"] or 0.4) * 100,
-                                       min_value=0.0, max_value=100.0, step=5.0, key="d_pct") / 100.0
+                                       min_value=0.0, max_value=100.0, step=5.0, key="d_pct",
+                                       help="Percentage of (MAA payment − expenses) paid to the doctor; used only when no flat override is set.") / 100.0
         new_flat_raw = d2.number_input("Flat Override ₹ (0 = use %)",
-                                       value=float(r["doctor_flat"] or 0), min_value=0.0, step=500.0, key="d_flat")
+                                       value=float(r["doctor_flat"] or 0), min_value=0.0, step=500.0, key="d_flat",
+                                       help="Fixed rupee amount for doctor; if set, this replaces the percentage calculation entirely.")
         new_flat = new_flat_raw if new_flat_raw > 0 else None
 
         maa_status_opts = ["", "Claim Paid", "Claim Approved", "Claim Raised", "Query Raised", "Rejected"]
@@ -79,8 +81,10 @@ def _entry_detail_dialog(row_id: int, conn):
         if cur_status not in maa_status_opts:
             maa_status_opts.append(cur_status)
         new_maa_status = st.selectbox("MAA Status", maa_status_opts,
-                                      index=maa_status_opts.index(cur_status), key="d_maa_status")
-        new_comments   = st.text_input("Comments", value=r["comments"] or "", key="d_comments")
+                                      index=maa_status_opts.index(cur_status), key="d_maa_status",
+                                      help="Current stage of the MAA claim: Claim Raised → Claim Approved → Claim Paid.")
+        new_comments   = st.text_input("Comments", value=r["comments"] or "", key="d_comments",
+                                       help="Any additional notes about this entry (e.g. pending documents, special arrangements).")
 
         with st.expander("⚙️ Advanced"):
             adv1, adv2 = st.columns(2)
@@ -90,6 +94,7 @@ def _entry_detail_dialog(row_id: int, conn):
             )
             new_doctor_paid = adv2.checkbox(
                 "Paid to Doctor", value=bool(r["doctor_paid"]), key="d_doctor_paid",
+                help="Tick once the doctor's share has been physically paid out.",
             )
             new_pay_month = st.text_input(
                 "Payment Month (YYYY-MM)", value=r["doctor_payment_month"] or "",
@@ -166,8 +171,10 @@ def _entry_detail_dialog(row_id: int, conn):
             )
         else:
             st.info("No MAA claim linked. Search below to find and link a matching admission.")
-            src_name   = st.text_input("Search by name", value=str(r["patient_name"] or ""), key="d_src")
-            src_expand = st.checkbox("Expand search to ±1 month", key="d_expand")
+            src_name   = st.text_input("Search by name", value=str(r["patient_name"] or ""), key="d_src",
+                                       help="Type the patient's name as it appears in the MAA portal to find their TID.")
+            src_expand = st.checkbox("Expand search to ±1 month", key="d_expand",
+                                     help="Also search admissions from the month before and after the filing month when no exact-month match is found.")
             if src_name:
                 candidates = db.search_claims_for_matching(conn, src_name, r["month"], expand=src_expand)
                 if candidates:
@@ -239,8 +246,10 @@ def render(conn) -> None:
         status_filter = st.multiselect(
             "MAA Status",
             ["Claim Paid", "Claim Approved", "Claim Raised", "Query Raised", "Rejected", "Non-MAA"],
+            help="Filter entries by their MAA claim stage; 'Non-MAA' shows entries with no linked claim.",
         )
-        paid_filter = st.selectbox("Doctor Paid", ["All", "Paid", "Unpaid"])
+        paid_filter = st.selectbox("Doctor Paid", ["All", "Paid", "Unpaid"],
+                                   help="Filter by whether the doctor's share has been paid out.")
 
     full_df = db.get_doctor_expenses(conn, selected_months) if selected_months else pd.DataFrame()
 
@@ -279,10 +288,12 @@ def render(conn) -> None:
         else:
             add_month = st.text_input("Month (YYYY-MM)", key="add_entry_month", placeholder="2025-06")
 
-        entry_type = st.radio("Patient type", ["MAA Patient", "Non-MAA Patient"], horizontal=True)
+        entry_type = st.radio("Patient type", ["MAA Patient", "Non-MAA Patient"], horizontal=True,
+                              help="MAA patients have a government insurance claim; Non-MAA patients are self-pay or covered by other insurance.")
 
         if entry_type == "MAA Patient":
-            search_name = st.text_input("Search patient name (from physical bill)", key="ae_search")
+            search_name = st.text_input("Search patient name (from physical bill)", key="ae_search",
+                                        help="Enter the name as written on the hospital bill; the system will look for a matching TID in the MAA portal data.")
             candidates: list[dict] = []
             if search_name and add_month:
                 candidates = db.search_claims_for_matching(conn, search_name, add_month, expand=False)
@@ -304,15 +315,21 @@ def render(conn) -> None:
                 st.info(f"Selected: **{chosen['patient_name']}** (TID: {chosen['tid']}, Adm: {chosen['date_of_admission']})")
 
                 c1, c2, c3 = st.columns(3)
-                hosp_ex     = c1.number_input("Hospital Ex ₹",  min_value=0, value=0, step=100, format="%d", key="ae_hosp")
-                pharma_ex   = c2.number_input("Pharmacy Ex ₹",  min_value=0, value=0, step=100, format="%d", key="ae_pharma")
-                dialysis_ex = c3.number_input("Dialysis Ex ₹",  min_value=0, value=0, step=100, format="%d", key="ae_dialysis")
+                hosp_ex     = c1.number_input("Hospital Ex ₹",  min_value=0, value=0, step=100, format="%d", key="ae_hosp",
+                                              help="Hospital expenses borne by the hospital (e.g. implants, consumables) — deducted before calculating doctor share.")
+                pharma_ex   = c2.number_input("Pharmacy Ex ₹",  min_value=0, value=0, step=100, format="%d", key="ae_pharma",
+                                              help="Pharmacy / medicine costs borne by the hospital — deducted before calculating doctor share.")
+                dialysis_ex = c3.number_input("Dialysis Ex ₹",  min_value=0, value=0, step=100, format="%d", key="ae_dialysis",
+                                              help="Dialysis session costs borne by the hospital — deducted before calculating doctor share.")
                 doctor_pct_input = st.number_input(
                     "Doctor % (default 40%)", min_value=0.0, max_value=100.0,
                     value=40.0, step=5.0, key="ae_pct",
+                    help="Percentage of (MAA payment − expenses) that goes to the doctor; overridden if a flat amount is entered below.",
                 ) / 100.0
-                doctor_flat_raw = st.number_input("Flat override ₹ (0 = use %)", min_value=0, value=0, step=500, format="%d", key="ae_flat")
-                comments_input  = st.text_input("Comments", key="ae_comments")
+                doctor_flat_raw = st.number_input("Flat override ₹ (0 = use %)", min_value=0, value=0, step=500, format="%d", key="ae_flat",
+                                                  help="Fixed rupee amount for the doctor; leave 0 to use the percentage above.")
+                comments_input  = st.text_input("Comments", key="ae_comments",
+                                                help="Any additional notes about this entry (e.g. pending documents, special arrangements).")
 
                 flat_val         = doctor_flat_raw if doctor_flat_raw > 0 else None
                 total_ex_preview = hosp_ex + pharma_ex + dialysis_ex
@@ -348,11 +365,16 @@ def render(conn) -> None:
             nm_name     = st.text_input("Patient Name", key="nm_name")
             nm_date     = st.date_input("Admission Date", key="nm_date")
             c1, c2, c3  = st.columns(3)
-            nm_hosp     = c1.number_input("Hospital Ex ₹",  min_value=0, value=0, step=100, format="%d", key="nm_hosp")
-            nm_pharma   = c2.number_input("Pharmacy Ex ₹",  min_value=0, value=0, step=100, format="%d", key="nm_pharma")
-            nm_dialysis = c3.number_input("Dialysis Ex ₹",  min_value=0, value=0, step=100, format="%d", key="nm_dialysis")
-            nm_share    = st.number_input("Doctor Share ₹", min_value=0, value=0, step=500, format="%d", key="nm_share")
-            nm_comments = st.text_input("Comments", key="nm_comments")
+            nm_hosp     = c1.number_input("Hospital Ex ₹",  min_value=0, value=0, step=100, format="%d", key="nm_hosp",
+                                          help="Hospital expenses borne by the hospital — recorded for reference, not used in any automatic calculation.")
+            nm_pharma   = c2.number_input("Pharmacy Ex ₹",  min_value=0, value=0, step=100, format="%d", key="nm_pharma",
+                                          help="Pharmacy / medicine costs borne by the hospital — recorded for reference.")
+            nm_dialysis = c3.number_input("Dialysis Ex ₹",  min_value=0, value=0, step=100, format="%d", key="nm_dialysis",
+                                          help="Dialysis session costs borne by the hospital — recorded for reference.")
+            nm_share    = st.number_input("Doctor Share ₹", min_value=0, value=0, step=500, format="%d", key="nm_share",
+                                          help="The fixed rupee amount agreed as the doctor's fee for this non-MAA patient.")
+            nm_comments = st.text_input("Comments", key="nm_comments",
+                                        help="Any additional notes about this entry (e.g. pending documents, special arrangements).")
 
             if st.button("Save Entry", type="primary", key="nm_save"):
                 if not nm_name:
@@ -504,6 +526,7 @@ def render(conn) -> None:
                 pay_month_input = st.text_input(
                     "Payment month (YYYY-MM)", value=default_pay,
                     placeholder="YYYY-MM", key="pay_month_input",
+                    help="The month in which the doctor's share was actually paid out (may differ from filing month).",
                 )
                 if st.button(f"✔ Mark {n} Paid", width="stretch", key="bulk_mark_paid"):
                     if pay_month_input:
@@ -526,6 +549,7 @@ def render(conn) -> None:
             with _ba3:
                 move_month_input = st.text_input(
                     "Move to month (YYYY-MM)", placeholder="YYYY-MM", key="move_month_input",
+                    help="Reassign the selected entries to a different filing month (e.g. to correct a wrong month).",
                 )
                 if st.button(f"📅 Change Month ({n})", width="stretch", key="bulk_change_month"):
                     if not move_month_input or not re.fullmatch(r"\d{4}-\d{2}", move_month_input):
