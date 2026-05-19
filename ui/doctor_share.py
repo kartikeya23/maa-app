@@ -1,4 +1,7 @@
-# pages/doctor_share.py
+# ui/doctor_share.py
+import re
+from datetime import date as _date
+
 import pandas as pd
 import streamlit as st
 
@@ -35,11 +38,25 @@ def _entry_detail_dialog(row_id: int, conn):
 
     tid_badge = f" · TID `{r['tid']}`" if pd.notna(r["tid"]) else " · *No MAA link*"
     st.subheader(r["patient_name"])
-    st.caption(f"Month: {r['month']} · Adm: {r['admission_date']}{tid_badge}")
+    _updated = str(r.get("updated_at", "") or "")[:10]
+    st.caption(f"Month: {r['month']} · Adm: {r['admission_date']} · Updated: {_updated}{tid_badge}")
 
     tab_edit, tab_maa = st.tabs(["✏️ Edit Entry", "🏥 MAA Claim"])
 
     with tab_edit:
+        n1, n2 = st.columns(2)
+        new_patient_name = n1.text_input(
+            "Patient Name", value=str(r["patient_name"] or ""), key="d_patient_name"
+        )
+        _adm_default = None
+        try:
+            _adm_default = _date.fromisoformat(str(r["admission_date"]))
+        except Exception:
+            pass
+        new_admission_date = n2.date_input(
+            "Admission Date", value=_adm_default, key="d_admission_date"
+        )
+
         c1, c2, c3 = st.columns(3)
         new_hosp     = c1.number_input("Hospital Ex ₹",  value=float(r["hosp_ex"] or 0),     min_value=0.0, step=100.0, key="d_hosp")
         new_pharma   = c2.number_input("Pharmacy Ex ₹",  value=float(r["pharma_ex"] or 0),   min_value=0.0, step=100.0, key="d_pharma")
@@ -78,6 +95,8 @@ def _entry_detail_dialog(row_id: int, conn):
 
         if st.button("💾 Save Changes", type="primary", key="d_save"):
             db.update_doctor_expense(conn, row_id, {
+                "patient_name":         new_patient_name or None,
+                "admission_date":       str(new_admission_date) if new_admission_date else None,
                 "hosp_ex":              new_hosp,
                 "pharma_ex":            new_pharma,
                 "dialysis_ex":          new_dialysis,
@@ -87,8 +106,9 @@ def _entry_detail_dialog(row_id: int, conn):
                 "maa_status":           new_maa_status or None,
                 "doctor_payment_month": new_pay_month or None,
             })
-            for _k in ["d_hosp", "d_pharma", "d_dialysis", "d_pct", "d_flat",
-                        "d_maa_status", "d_pay_month", "d_comments"]:
+            for _k in ["d_patient_name", "d_admission_date", "d_hosp", "d_pharma",
+                        "d_dialysis", "d_pct", "d_flat", "d_maa_status",
+                        "d_pay_month", "d_comments"]:
                 st.session_state.pop(_k, None)
             st.success("Saved.")
 
