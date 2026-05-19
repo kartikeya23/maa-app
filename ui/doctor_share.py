@@ -362,10 +362,13 @@ def render(conn) -> None:
         unpaid_ct  = int((df["doctor_paid"] == 0).sum()) if not df.empty else 0
         non_maa_ct = int(df["tid"].isna().sum())          if not df.empty else 0
         filter_note = f" (filtered from {len(full_df)})" if (status_filter or paid_filter != "All") else ""
-        st.markdown(
+        _cnt_col, _ref_col = st.columns([8, 1])
+        _cnt_col.markdown(
             f"**{len(df)}** {'entry' if len(df) == 1 else 'entries'}{filter_note}"
             f"&ensp;·&ensp;{paid_ct} paid&ensp;·&ensp;{unpaid_ct} unpaid&ensp;·&ensp;{non_maa_ct} non-MAA"
         )
+        if _ref_col.button("🔄", key="ds_refresh", help="Refresh entries"):
+            st.rerun()
 
         df_r = df.reset_index(drop=True)
         _multi = len(selected_months) > 1
