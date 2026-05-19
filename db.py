@@ -138,7 +138,7 @@ def _row_hash(row: dict) -> str:
 
 
 def init_db(path: str | Path = DB_PATH) -> sqlite3.Connection:
-    conn = sqlite3.connect(str(path))
+    conn = sqlite3.connect(str(path), check_same_thread=False)
     conn.executescript(DDL)
     conn.executescript(HASH_DDL)
     conn.executescript(DOCTOR_EXPENSES_DDL)

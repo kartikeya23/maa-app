@@ -15,6 +15,11 @@ def _link_and_infer_status(conn, row_id: int, tid: str) -> None:
     updates: dict = {"tid": tid}
     if inferred:
         updates["maa_status"] = inferred
+    adm_row = conn.execute(
+        "SELECT date_of_admission FROM claims WHERE tid = ? LIMIT 1", (tid,)
+    ).fetchone()
+    if adm_row and adm_row[0]:
+        updates["admission_date"] = adm_row[0]
     db.update_doctor_expense(conn, row_id, updates)
 
 
