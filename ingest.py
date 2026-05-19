@@ -167,6 +167,8 @@ def parse_csv(csv_path: str) -> list[dict]:
             for csv_col, (db_col, transform) in COLUMN_MAP.items():
                 raw = csv_row.get(csv_col, "")
                 row[db_col] = transform(raw)
+            if row.get("status") and "paid" in row["status"].lower():
+                row["paid_amount"] = row.get("approved_amount")
             rows.append(row)
     return rows
 

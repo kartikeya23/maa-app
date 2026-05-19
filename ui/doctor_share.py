@@ -137,16 +137,16 @@ def _entry_detail_dialog(row_id: int, conn):
             pkgs = db.query_packages_for_tid(conn, tid)
             if not pkgs.empty:
                 st.dataframe(
-                    pkgs[["pkg_name", "pkg_speciality_name", "approved_amount", "paid_amount",
+                    pkgs[["pkg_name", "pkg_speciality_name", "approved_amount",
                            "status", "payment_date"]].rename(columns={
                         "pkg_name": "Package", "pkg_speciality_name": "Speciality",
-                        "approved_amount": "Approved ₹", "paid_amount": "Paid ₹",
+                        "approved_amount": "Approved ₹",
                         "status": "Status", "payment_date": "Payment Date",
                     }),
                     hide_index=True, width='stretch',
                 )
                 _bill_total = pkgs["pkg_rate"].sum()
-                _paid_amt   = pkgs.loc[pkgs["status"] == "Claim Paid", "approved_amount"].sum()
+                _paid_amt   = pkgs.loc[pkgs["status"].str.contains("paid", case=False, na=False), "approved_amount"].fillna(0).sum()
                 t1, t2, t3, t4 = st.columns(4)
                 t1.metric("Bill Total",      fmt_inr(_bill_total))
                 t2.metric("Total Approved",  fmt_inr(pkgs["approved_amount"].sum()))
