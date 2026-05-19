@@ -208,7 +208,33 @@ def test_mark_doctor_paid(mem_db):
 
 
 def test_update_doctor_expense_disallowed_key(mem_db):
-    """created_at and doctor_paid are not in the allowlist — must not be writable."""
+    """created_at must not be writable via update_doctor_expense."""
+    conn = mem_db
+    conn.execute(
+        "INSERT INTO doctor_expenses (tid, patient_name, admission_date, month) VALUES (?, ?, ?, ?)",
+        ("T001", "Patient A", "2025-06-01", "2025-06"),
+    )
+    conn.commit()
+    row_id = conn.execute("SELECT id FROM doctor_expenses").fetchone()[0]
+    db.update_doctor_expense(conn, row_id, {"created_at": "1970-01-01"})
+    row = conn.execute("SELECT created_at FROM doctor_expenses WHERE id=?", (row_id,)).fetchone()
+    assert row[0] != "1970-01-01", "created_at must not be updated via update_doctor_expense"
+
+
+def test_update_doctor_expense_month(mem_db):
+    conn = mem_db
+    conn.execute(
+        "INSERT INTO doctor_expenses (tid, patient_name, admission_date, month) VALUES (?, ?, ?, ?)",
+        ("T001", "Patient A", "2025-06-01", "2025-06"),
+    )
+    conn.commit()
+    row_id = conn.execute("SELECT id FROM doctor_expenses").fetchone()[0]
+    db.update_doctor_expense(conn, row_id, {"month": "2025-07"})
+    month = conn.execute("SELECT month FROM doctor_expenses WHERE id=?", (row_id,)).fetchone()[0]
+    assert month == "2025-07"
+
+
+def test_update_doctor_expense_doctor_paid(mem_db):
     conn = mem_db
     conn.execute(
         "INSERT INTO doctor_expenses (tid, patient_name, admission_date, month, doctor_paid) VALUES (?, ?, ?, ?, ?)",
@@ -216,7 +242,23 @@ def test_update_doctor_expense_disallowed_key(mem_db):
     )
     conn.commit()
     row_id = conn.execute("SELECT id FROM doctor_expenses").fetchone()[0]
-    db.update_doctor_expense(conn, row_id, {"doctor_paid": 1, "created_at": "1970-01-01"})
-    row = conn.execute("SELECT doctor_paid, created_at FROM doctor_expenses WHERE id=?", (row_id,)).fetchone()
-    assert row[0] == 0, "doctor_paid must not be updated via update_doctor_expense"
-    assert row[1] != "1970-01-01", "created_at must not be updated via update_doctor_expense"
+    db.update_doctor_expense(conn, row_id, {"doctor_paid": 1})
+    paid = conn.execute("SELECT doctor_paid FROM doctor_expenses WHERE id=?", (row_id,)).fetchone()[0]
+    assert paid == 1
+
+
+def test_unmark_doctor_paid(mem_db):
+    conn = mem_db
+    conn.executemany(
+        "INSERT INTO doctor_expenses (tid, patient_name, admission_date, month, doctor_paid, doctor_payment_month) VALUES (?, ?, ?, ?, ?, ?)",
+        [
+            ("T001", "P1", "2025-06-01", "2025-06", 1, "2025-06"),
+            ("T002", "P2", "2025-06-02", "2025-06", 1, "2025-06"),
+        ],
+    )
+    conn.commit()
+    ids = [r[0] for r in conn.execute("SELECT id FROM doctor_expenses").fetchall()]
+    db.unmark_doctor_paid(conn, ids)
+    rows = conn.execute("SELECT doctor_paid, doctor_payment_month FROM doctor_expenses").fetchall()
+    assert all(r[0] == 0 for r in rows)
+    assert all(r[1] is None for r in rows)

@@ -682,11 +682,13 @@ def save_doctor_expense(
 def update_doctor_expense(conn: sqlite3.Connection, row_id: int, fields: dict) -> None:
     """Update fields on a doctor_expenses row.
     Allowed keys: hosp_ex, pharma_ex, dialysis_ex, doctor_pct, doctor_flat, comments,
-                  doctor_payment_month, maa_status, tid, patient_name, admission_date.
+                  doctor_payment_month, maa_status, tid, patient_name, admission_date,
+                  month, doctor_paid.
     """
     allowed = {
         "hosp_ex", "pharma_ex", "dialysis_ex", "doctor_pct", "doctor_flat", "comments",
         "doctor_payment_month", "maa_status", "tid", "patient_name", "admission_date",
+        "month", "doctor_paid",
     }
     updates = {k: v for k, v in fields.items() if k in allowed}
     if not updates:
@@ -712,6 +714,18 @@ def mark_doctor_paid(conn: sqlite3.Connection, ids: list[int], payment_month: st
     conn.execute(
         f"UPDATE doctor_expenses SET doctor_paid = 1, doctor_payment_month = ?, updated_at = datetime('now') WHERE id IN ({placeholders})",
         [payment_month] + ids,
+    )
+    conn.commit()
+
+
+def unmark_doctor_paid(conn: sqlite3.Connection, ids: list[int]) -> None:
+    """Bulk-clear doctor_paid and doctor_payment_month for the given ids."""
+    if not ids:
+        return
+    placeholders = ",".join("?" for _ in ids)
+    conn.execute(
+        f"UPDATE doctor_expenses SET doctor_paid = 0, doctor_payment_month = NULL, updated_at = datetime('now') WHERE id IN ({placeholders})",
+        ids,
     )
     conn.commit()
 
