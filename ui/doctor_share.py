@@ -429,11 +429,13 @@ def render(conn) -> None:
             _COLS = [0.22, 3.2, 1.25, 1.15, 1.15, 1.15, 2.4, 0.6]
             _hdrs = ["", "Patient", "Date", "Total Ex", "MAA Pmt", "Dr Share", "Status", ""]
 
+        _RIGHT_HDRS = {"Total Ex", "MAA Pmt", "Dr Share"}
         _hrow = st.columns(_COLS)
         for _hi, _hl in enumerate(_hdrs[1:], start=1):
             if _hl:
+                _align = "right" if _hl in _RIGHT_HDRS else "left"
                 _hrow[_hi].markdown(
-                    f"<p style='margin:0;padding:2px 0 4px;color:#888;"
+                    f"<p style='margin:0;padding:2px 0 4px;color:#888;text-align:{_align};"
                     f"font-size:0.78rem;font-weight:600;letter-spacing:0.03em'>{_hl}</p>",
                     unsafe_allow_html=True,
                 )
@@ -447,8 +449,8 @@ def render(conn) -> None:
         _STATUS_STYLE = {
             "Claim Paid":     "color:#2e7d32;font-weight:600",
             "Claim Approved": "color:#e65100",
-            "Claim Raised":   "color:#e65100",
-            "Query Raised":   "color:#b71c1c",
+            "Claim Raised":   "color:#b8860b",
+            "Query Raised":   "color:#b8860b",
             "Rejected":       "color:#9e9e9e",
             "Non-MAA":        "color:#9e9e9e",
         }
