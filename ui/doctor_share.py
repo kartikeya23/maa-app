@@ -363,35 +363,32 @@ def render(conn) -> None:
                 st.warning("No matching admissions found. Try a partial name or expand to ±1 month.")
 
         else:  # Non-MAA
-            nm_name     = st.text_input("Patient Name", key="nm_name")
-            nm_date     = st.date_input("Admission Date", key="nm_date")
-            c1, c2, c3  = st.columns(3)
-            nm_hosp     = c1.number_input("Hospital Ex ₹",  min_value=0, value=0, step=100, format="%d", key="nm_hosp",
-                                          help="Hospital expenses borne by the hospital — recorded for reference, not used in any automatic calculation.")
-            nm_pharma   = c2.number_input("Pharmacy Ex ₹",  min_value=0, value=0, step=100, format="%d", key="nm_pharma",
-                                          help="Pharmacy / medicine costs borne by the hospital — recorded for reference.")
-            nm_dialysis = c3.number_input("Dialysis Ex ₹",  min_value=0, value=0, step=100, format="%d", key="nm_dialysis",
-                                          help="Dialysis session costs borne by the hospital — recorded for reference.")
-            nm_share    = st.number_input("Doctor Share ₹", min_value=0, value=0, step=500, format="%d", key="nm_share",
-                                          help="The fixed rupee amount agreed as the doctor's fee for this non-MAA patient.")
-            nm_comments = st.text_input("Comments", key="nm_comments",
-                                        help="Any additional notes about this entry (e.g. pending documents, special arrangements).")
-
-            if st.button("Save Entry", type="primary", key="nm_save"):
-                if not nm_name:
-                    st.error("Patient name is required.")
-                else:
-                    db.save_doctor_expense(
-                        conn, month=add_month, patient_name=nm_name,
-                        admission_date=str(nm_date),
-                        hosp_ex=nm_hosp, pharma_ex=nm_pharma, dialysis_ex=nm_dialysis,
-                        doctor_flat=nm_share, comments=nm_comments or None, tid=None,
-                    )
-                    st.success(f"Added non-MAA entry for {nm_name}.")
-                    for _k in ["nm_name", "nm_date", "nm_hosp", "nm_pharma",
-                               "nm_dialysis", "nm_share", "nm_comments"]:
-                        st.session_state.pop(_k, None)
-                    st.rerun()
+            with st.form("nm_form", clear_on_submit=True):
+                nm_name     = st.text_input("Patient Name")
+                nm_date     = st.date_input("Admission Date")
+                c1, c2, c3  = st.columns(3)
+                nm_hosp     = c1.number_input("Hospital Ex ₹",  min_value=0, value=0, step=100, format="%d",
+                                              help="Hospital expenses borne by the hospital — recorded for reference, not used in any automatic calculation.")
+                nm_pharma   = c2.number_input("Pharmacy Ex ₹",  min_value=0, value=0, step=100, format="%d",
+                                              help="Pharmacy / medicine costs borne by the hospital — recorded for reference.")
+                nm_dialysis = c3.number_input("Dialysis Ex ₹",  min_value=0, value=0, step=100, format="%d",
+                                              help="Dialysis session costs borne by the hospital — recorded for reference.")
+                nm_share    = st.number_input("Doctor Share ₹", min_value=0, value=0, step=500, format="%d",
+                                              help="The fixed rupee amount agreed as the doctor's fee for this non-MAA patient.")
+                nm_comments = st.text_input("Comments",
+                                            help="Any additional notes about this entry (e.g. pending documents, special arrangements).")
+                if st.form_submit_button("Save Entry", type="primary"):
+                    if not nm_name:
+                        st.error("Patient name is required.")
+                    else:
+                        db.save_doctor_expense(
+                            conn, month=add_month, patient_name=nm_name,
+                            admission_date=str(nm_date),
+                            hosp_ex=nm_hosp, pharma_ex=nm_pharma, dialysis_ex=nm_dialysis,
+                            doctor_flat=nm_share, comments=nm_comments or None, tid=None,
+                        )
+                        st.success(f"Added non-MAA entry for {nm_name}.")
+                        st.rerun()
 
     _components.html("""
 <script>
