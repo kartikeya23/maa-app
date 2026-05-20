@@ -4,6 +4,7 @@ from datetime import date as _date
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as _components
 
 import db
 import reports
@@ -393,6 +394,26 @@ def render(conn) -> None:
                                "nm_dialysis", "nm_share", "nm_comments"]:
                         st.session_state.pop(_k, None)
                     st.rerun()
+
+    _components.html("""
+<script>
+(function() {
+    var doc = window.parent.document;
+    var win = window.parent;
+    if (win._maa_save_handler) {
+        doc.removeEventListener('keydown', win._maa_save_handler);
+    }
+    win._maa_save_handler = function(e) {
+        if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+            var btn = Array.from(doc.querySelectorAll('button'))
+                          .find(function(b) { return b.innerText.trim() === 'Save Entry'; });
+            if (btn && !btn.disabled) { e.preventDefault(); btn.click(); }
+        }
+    };
+    doc.addEventListener('keydown', win._maa_save_handler);
+})();
+</script>
+""", height=0)
 
     if not selected_months:
         st.info("Select at least one month from the sidebar.")
