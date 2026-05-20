@@ -423,17 +423,18 @@ def render(conn) -> None:
         _page_rows = df_r.iloc[_start : _start + _PAGE_SIZE]
 
         if _multi:
-            _COLS = [0.22, 0.85, 2.9, 1.25, 1.15, 1.15, 1.15, 2.4, 0.6]
+            _COLS = [0.18, 0.65, 2.6, 0.78, 0.78, 0.78, 0.78, 1.1, 0.3]
             _hdrs = ["", "Month", "Patient", "Date", "Total Ex", "MAA Pmt", "Dr Share", "Status", ""]
         else:
-            _COLS = [0.22, 3.2, 1.25, 1.15, 1.15, 1.15, 2.4, 0.6]
+            _COLS = [0.18, 2.8, 0.78, 0.78, 0.78, 0.78, 1.1, 0.3]
             _hdrs = ["", "Patient", "Date", "Total Ex", "MAA Pmt", "Dr Share", "Status", ""]
 
-        _RIGHT_HDRS = {"Total Ex", "MAA Pmt", "Dr Share"}
+        _RIGHT_HDRS  = {"Total Ex", "MAA Pmt", "Dr Share"}
+        _CENTER_HDRS = {"Date"}
         _hrow = st.columns(_COLS)
         for _hi, _hl in enumerate(_hdrs[1:], start=1):
             if _hl:
-                _align = "right" if _hl in _RIGHT_HDRS else "left"
+                _align = "right" if _hl in _RIGHT_HDRS else ("center" if _hl in _CENTER_HDRS else "left")
                 _hrow[_hi].markdown(
                     f"<p style='margin:0;padding:2px 0 4px;color:#888;text-align:{_align};"
                     f"font-size:0.78rem;font-weight:600;letter-spacing:0.03em'>{_hl}</p>",
@@ -443,8 +444,8 @@ def render(conn) -> None:
 
         def _md_money(v):
             if pd.isna(v):
-                return "<div style='text-align:right;color:#bbb;font-size:0.9rem'>—</div>"
-            return f"<div style='text-align:right;font-size:0.9rem'>₹{v:,.0f}</div>"
+                return "<div style='text-align:right;color:#bbb;font-size:0.9rem;padding-top:9px'>—</div>"
+            return f"<div style='text-align:right;font-size:0.9rem;padding-top:9px'>₹{v:,.0f}</div>"
 
         _STATUS_STYLE = {
             "Claim Paid":     "color:#2e7d32;font-weight:600",
@@ -462,7 +463,7 @@ def render(conn) -> None:
             _ci = 1
             if _multi:
                 _c[_ci].markdown(
-                    f"<p style='margin:0;font-size:0.8rem;color:#999;padding-top:6px'>{_row['month']}</p>",
+                    f"<p style='margin:0;font-size:0.8rem;color:#999;padding-top:9px'>{_row['month']}</p>",
                     unsafe_allow_html=True,
                 )
                 _ci += 1
@@ -470,7 +471,7 @@ def render(conn) -> None:
                 _entry_detail_dialog(_rid, conn)
             _ci += 1
             _c[_ci].markdown(
-                f"<p style='margin:0;font-size:0.9rem;padding-top:6px'>{_row['admission_date'] or '—'}</p>",
+                f"<p style='margin:0;font-size:0.9rem;padding-top:9px;text-align:center'>{_row['admission_date'] or '—'}</p>",
                 unsafe_allow_html=True,
             ); _ci += 1
             _c[_ci].markdown(_md_money(_row["total_ex"]), unsafe_allow_html=True); _ci += 1
@@ -479,7 +480,7 @@ def render(conn) -> None:
             _status_val = _row["maa_status"] or "Non-MAA"
             _sstyle = _STATUS_STYLE.get(_status_val, "color:#333")
             _c[_ci].markdown(
-                f"<p style='margin:0;font-size:0.85rem;padding-top:6px;{_sstyle}'>{_status_val}</p>",
+                f"<p style='margin:0;font-size:0.85rem;padding-top:9px;{_sstyle}'>{_status_val}</p>",
                 unsafe_allow_html=True,
             ); _ci += 1
             if _row["doctor_paid"] == 1:
