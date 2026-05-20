@@ -25,8 +25,18 @@ def get_conn():
 
 conn = get_conn()
 
+_VALID_PAGES = {"Dashboard", "Ingest", "Admissions", "Reports", "Doctor Share"}
+
 if "_page" not in st.session_state:
-    st.session_state["_page"] = "Dashboard"
+    _qp = st.query_params.get("page", "Dashboard")
+    st.session_state["_page"] = _qp if _qp in _VALID_PAGES else "Dashboard"
+
+
+def _nav(page: str) -> None:
+    st.session_state["_page"] = page
+    st.query_params["page"] = page
+    st.rerun()
+
 
 with st.sidebar:
     st.title("🏥 MAA Records")
@@ -35,8 +45,7 @@ with st.sidebar:
             _p, key=f"nav_{_p}", width="stretch",
             type="primary" if st.session_state["_page"] == _p else "secondary",
         ):
-            st.session_state["_page"] = _p
-            st.rerun()
+            _nav(_p)
 
     st.divider()
     st.caption("CLINICAL")
@@ -44,8 +53,7 @@ with st.sidebar:
         "🩺 Doctor Share", key="nav_ds", width="stretch",
         type="primary" if st.session_state["_page"] == "Doctor Share" else "secondary",
     ):
-        st.session_state["_page"] = "Doctor Share"
-        st.rerun()
+        _nav("Doctor Share")
 
 _PAGE_MAP = {
     "Dashboard":    dashboard,
