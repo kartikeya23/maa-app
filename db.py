@@ -549,26 +549,27 @@ def get_doctor_expenses(conn: sqlite3.Connection, months: str | list[str]) -> pd
         return df
 
     df["total_ex"] = df["hosp_ex"] + df["pharma_ex"] + df["dialysis_ex"]
-    df["doctor_share"] = df.apply(
-        lambda r: r["doctor_flat"]
-        if pd.notna(r["doctor_flat"])
-        else (
-            r["doctor_pct"] * (r["maa_payment"] - r["total_ex"])
-            if pd.notna(r["maa_payment"])
-            else None
-        ),
-        axis=1,
-    )
-    df["hospital_share"] = df.apply(
-        lambda r: r["maa_payment"] - r["doctor_share"] - r["total_ex"]
-        if (
-            pd.notna(r["tid"])
-            and pd.notna(r["maa_payment"]) and r["maa_payment"] > 0
-            and pd.notna(r["doctor_share"])
-        )
-        else None,
-        axis=1,
-    )
+
+    def _is_rejected(r):
+        return isinstance(r.get("maa_status"), str) and "rejected" in r["maa_status"].lower()
+
+    def _doctor_share(r):
+        if pd.notna(r["doctor_flat"]):
+            return r["doctor_flat"]
+        if not pd.notna(r["maa_payment"]):
+            return None
+        val = r["doctor_pct"] * (r["maa_payment"] - r["total_ex"])
+        return val if _is_rejected(r) else max(0.0, val)
+
+    def _hospital_share(r):
+        if not (pd.notna(r["tid"]) and pd.notna(r["maa_payment"])
+                and r["maa_payment"] > 0 and pd.notna(r["doctor_share"])):
+            return None
+        val = r["maa_payment"] - r["doctor_share"] - r["total_ex"]
+        return val if _is_rejected(r) else max(0.0, val)
+
+    df["doctor_share"] = df.apply(_doctor_share, axis=1)
+    df["hospital_share"] = df.apply(_hospital_share, axis=1)
     return df
 
 
@@ -613,10 +614,15 @@ def search_claims_for_matching(
 
 
 def infer_maa_status(conn: sqlite3.Connection, tid: str) -> str | None:
-    """Infer maa_status from claims data for a linked TID.
+    """Infer a single maa_status from all claims packages for a TID.
 
-    Considers only packages with approved_amount > 0 (non-zero claims).
-    Priority: pending > approved > rejected > paid.
+    Considers only packages with approved_amount > 0.
+    Priority:
+      paid + pending  → Claim Approved  (partial payment, more outstanding)
+      pending only    → Claim Raised
+      paid (any mix)  → Claim Paid
+      approved (any)  → Claim Approved
+      all rejected    → Rejected
     Returns None if no non-zero claims exist.
     """
     rows = conn.execute(
@@ -633,19 +639,21 @@ def infer_maa_status(conn: sqlite3.Connection, tid: str) -> str | None:
         if "rejected" in sl:
             return "rejected"
         if "pre" in sl:
-            return "pending"  # Pre Auth states before 'approved' check
+            return "pending"
         if "approved" in sl:
             return "approved"
-        return "pending"  # Pending, Query
+        return "pending"
 
     cats = {_cat(s) for s, _ in non_zero}
+    if "paid" in cats and "pending" in cats:
+        return "Claim Approved"
     if "pending" in cats:
         return "Claim Raised"
+    if "paid" in cats:
+        return "Claim Paid"
     if "approved" in cats:
         return "Claim Approved"
-    if cats == {"rejected"}:
-        return "Rejected"
-    return "Claim Paid"  # all paid, or mix of paid + rejected
+    return "Rejected"
 
 
 # ── Doctor Share write operations ─────────────────────────────────────────────

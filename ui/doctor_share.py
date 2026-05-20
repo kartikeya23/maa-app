@@ -351,7 +351,7 @@ def render(conn) -> None:
                         hosp_ex=hosp_ex, pharma_ex=pharma_ex, dialysis_ex=dialysis_ex,
                         doctor_pct=doctor_pct_input, doctor_flat=flat_val,
                         comments=comments_input or None,
-                        maa_status=chosen["status"], tid=chosen["tid"],
+                        maa_status=db.infer_maa_status(conn, chosen["tid"]), tid=chosen["tid"],
                     )
                     st.success(f"Added entry for {chosen['patient_name']}.")
                     for _k in ["ae_search", "ae_hosp", "ae_pharma", "ae_dialysis",
