@@ -380,8 +380,6 @@ def render(conn) -> None:
             if st.button("Save Entry", type="primary", key="nm_save"):
                 if not nm_name:
                     st.error("Patient name is required.")
-                elif nm_share <= 0:
-                    st.error("Doctor share must be greater than 0.")
                 else:
                     db.save_doctor_expense(
                         conn, month=add_month, patient_name=nm_name,
