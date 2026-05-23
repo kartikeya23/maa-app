@@ -16,6 +16,7 @@ leading zeros and avoid integer precision loss.
 import argparse
 import csv
 import glob
+import io
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -157,20 +158,25 @@ COLUMN_MAP = {
 }
 
 
+def parse_csv_content(csv_str: str) -> list[dict]:
+    """Parse CSV text and return a list of db-ready row dicts."""
+    rows = []
+    reader = csv.DictReader(io.StringIO(csv_str))
+    for csv_row in reader:
+        row = {}
+        for csv_col, (db_col, transform) in COLUMN_MAP.items():
+            raw = csv_row.get(csv_col, "")
+            row[db_col] = transform(raw)
+        if row.get("status") and "paid" in row["status"].lower():
+            row["paid_amount"] = row.get("approved_amount")
+        rows.append(row)
+    return rows
+
+
 def parse_csv(csv_path: str) -> list[dict]:
     """Read a CSV file and return a list of db-ready row dicts."""
-    rows = []
     with open(csv_path, newline="", encoding="utf-8-sig") as fh:
-        reader = csv.DictReader(fh)
-        for csv_row in reader:
-            row = {}
-            for csv_col, (db_col, transform) in COLUMN_MAP.items():
-                raw = csv_row.get(csv_col, "")
-                row[db_col] = transform(raw)
-            if row.get("status") and "paid" in row["status"].lower():
-                row["paid_amount"] = row.get("approved_amount")
-            rows.append(row)
-    return rows
+        return parse_csv_content(fh.read())
 
 
 def ingest(csv_files: list[str], dry_run: bool = False):

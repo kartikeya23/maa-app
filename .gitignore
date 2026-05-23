@@ -57,3 +57,9 @@ coverage.xml
 
 # Windows files
 Thumbs.db
+
+# Worktrees
+.worktrees/
+
+# Portal fetch cache
+cache/

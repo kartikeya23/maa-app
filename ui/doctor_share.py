@@ -4,6 +4,7 @@ from datetime import date as _date
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as _components
 
 import db
 import reports
@@ -362,37 +363,52 @@ def render(conn) -> None:
                 st.warning("No matching admissions found. Try a partial name or expand to ±1 month.")
 
         else:  # Non-MAA
-            nm_name     = st.text_input("Patient Name", key="nm_name")
-            nm_date     = st.date_input("Admission Date", key="nm_date")
-            c1, c2, c3  = st.columns(3)
-            nm_hosp     = c1.number_input("Hospital Ex ₹",  min_value=0, value=0, step=100, format="%d", key="nm_hosp",
-                                          help="Hospital expenses borne by the hospital — recorded for reference, not used in any automatic calculation.")
-            nm_pharma   = c2.number_input("Pharmacy Ex ₹",  min_value=0, value=0, step=100, format="%d", key="nm_pharma",
-                                          help="Pharmacy / medicine costs borne by the hospital — recorded for reference.")
-            nm_dialysis = c3.number_input("Dialysis Ex ₹",  min_value=0, value=0, step=100, format="%d", key="nm_dialysis",
-                                          help="Dialysis session costs borne by the hospital — recorded for reference.")
-            nm_share    = st.number_input("Doctor Share ₹", min_value=0, value=0, step=500, format="%d", key="nm_share",
-                                          help="The fixed rupee amount agreed as the doctor's fee for this non-MAA patient.")
-            nm_comments = st.text_input("Comments", key="nm_comments",
-                                        help="Any additional notes about this entry (e.g. pending documents, special arrangements).")
+            with st.form("nm_form", clear_on_submit=True):
+                nm_name     = st.text_input("Patient Name")
+                nm_date     = st.date_input("Admission Date")
+                c1, c2, c3  = st.columns(3)
+                nm_hosp     = c1.number_input("Hospital Ex ₹",  min_value=0, value=0, step=100, format="%d",
+                                              help="Hospital expenses borne by the hospital — recorded for reference, not used in any automatic calculation.")
+                nm_pharma   = c2.number_input("Pharmacy Ex ₹",  min_value=0, value=0, step=100, format="%d",
+                                              help="Pharmacy / medicine costs borne by the hospital — recorded for reference.")
+                nm_dialysis = c3.number_input("Dialysis Ex ₹",  min_value=0, value=0, step=100, format="%d",
+                                              help="Dialysis session costs borne by the hospital — recorded for reference.")
+                nm_share    = st.number_input("Doctor Share ₹", min_value=0, value=0, step=500, format="%d",
+                                              help="The fixed rupee amount agreed as the doctor's fee for this non-MAA patient.")
+                nm_comments = st.text_input("Comments",
+                                            help="Any additional notes about this entry (e.g. pending documents, special arrangements).")
+                if st.form_submit_button("Save Entry", type="primary"):
+                    if not nm_name:
+                        st.error("Patient name is required.")
+                    else:
+                        db.save_doctor_expense(
+                            conn, month=add_month, patient_name=nm_name,
+                            admission_date=str(nm_date),
+                            hosp_ex=nm_hosp, pharma_ex=nm_pharma, dialysis_ex=nm_dialysis,
+                            doctor_flat=nm_share, comments=nm_comments or None, tid=None,
+                        )
+                        st.success(f"Added non-MAA entry for {nm_name}.")
+                        st.rerun()
 
-            if st.button("Save Entry", type="primary", key="nm_save"):
-                if not nm_name:
-                    st.error("Patient name is required.")
-                elif nm_share <= 0:
-                    st.error("Doctor share must be greater than 0.")
-                else:
-                    db.save_doctor_expense(
-                        conn, month=add_month, patient_name=nm_name,
-                        admission_date=str(nm_date),
-                        hosp_ex=nm_hosp, pharma_ex=nm_pharma, dialysis_ex=nm_dialysis,
-                        doctor_flat=nm_share, comments=nm_comments or None, tid=None,
-                    )
-                    st.success(f"Added non-MAA entry for {nm_name}.")
-                    for _k in ["nm_name", "nm_date", "nm_hosp", "nm_pharma",
-                               "nm_dialysis", "nm_share", "nm_comments"]:
-                        st.session_state.pop(_k, None)
-                    st.rerun()
+    _components.html("""
+<script>
+(function() {
+    var doc = window.parent.document;
+    var win = window.parent;
+    if (win._maa_save_handler) {
+        doc.removeEventListener('keydown', win._maa_save_handler);
+    }
+    win._maa_save_handler = function(e) {
+        if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+            var btn = Array.from(doc.querySelectorAll('button'))
+                          .find(function(b) { return b.innerText.trim() === 'Save Entry'; });
+            if (btn && !btn.disabled) { e.preventDefault(); btn.click(); }
+        }
+    };
+    doc.addEventListener('keydown', win._maa_save_handler);
+})();
+</script>
+""", height=0)
 
     if not selected_months:
         st.info("Select at least one month from the sidebar.")
@@ -423,17 +439,18 @@ def render(conn) -> None:
         _page_rows = df_r.iloc[_start : _start + _PAGE_SIZE]
 
         if _multi:
-            _COLS = [0.22, 0.85, 2.9, 1.25, 1.15, 1.15, 1.15, 2.4, 0.6]
+            _COLS = [0.18, 0.65, 2.6, 0.78, 0.78, 0.78, 0.78, 1.1, 0.3]
             _hdrs = ["", "Month", "Patient", "Date", "Total Ex", "MAA Pmt", "Dr Share", "Status", ""]
         else:
-            _COLS = [0.22, 3.2, 1.25, 1.15, 1.15, 1.15, 2.4, 0.6]
+            _COLS = [0.18, 2.8, 0.78, 0.78, 0.78, 0.78, 1.1, 0.3]
             _hdrs = ["", "Patient", "Date", "Total Ex", "MAA Pmt", "Dr Share", "Status", ""]
 
-        _RIGHT_HDRS = {"Total Ex", "MAA Pmt", "Dr Share"}
+        _RIGHT_HDRS  = {"Total Ex", "MAA Pmt", "Dr Share"}
+        _CENTER_HDRS = {"Date"}
         _hrow = st.columns(_COLS)
         for _hi, _hl in enumerate(_hdrs[1:], start=1):
             if _hl:
-                _align = "right" if _hl in _RIGHT_HDRS else "left"
+                _align = "right" if _hl in _RIGHT_HDRS else ("center" if _hl in _CENTER_HDRS else "left")
                 _hrow[_hi].markdown(
                     f"<p style='margin:0;padding:2px 0 4px;color:#888;text-align:{_align};"
                     f"font-size:0.78rem;font-weight:600;letter-spacing:0.03em'>{_hl}</p>",
@@ -443,8 +460,8 @@ def render(conn) -> None:
 
         def _md_money(v):
             if pd.isna(v):
-                return "<div style='text-align:right;color:#bbb;font-size:0.9rem'>—</div>"
-            return f"<div style='text-align:right;font-size:0.9rem'>₹{v:,.0f}</div>"
+                return "<div style='text-align:right;color:#bbb;font-size:0.9rem;padding-top:9px'>—</div>"
+            return f"<div style='text-align:right;font-size:0.9rem;padding-top:9px'>₹{v:,.0f}</div>"
 
         _STATUS_STYLE = {
             "Claim Paid":     "color:#2e7d32;font-weight:600",
@@ -462,7 +479,7 @@ def render(conn) -> None:
             _ci = 1
             if _multi:
                 _c[_ci].markdown(
-                    f"<p style='margin:0;font-size:0.8rem;color:#999;padding-top:6px'>{_row['month']}</p>",
+                    f"<p style='margin:0;font-size:0.8rem;color:#999;padding-top:9px'>{_row['month']}</p>",
                     unsafe_allow_html=True,
                 )
                 _ci += 1
@@ -470,7 +487,7 @@ def render(conn) -> None:
                 _entry_detail_dialog(_rid, conn)
             _ci += 1
             _c[_ci].markdown(
-                f"<p style='margin:0;font-size:0.9rem;padding-top:6px'>{_row['admission_date'] or '—'}</p>",
+                f"<p style='margin:0;font-size:0.9rem;padding-top:9px;text-align:center'>{_row['admission_date'] or '—'}</p>",
                 unsafe_allow_html=True,
             ); _ci += 1
             _c[_ci].markdown(_md_money(_row["total_ex"]), unsafe_allow_html=True); _ci += 1
@@ -479,7 +496,7 @@ def render(conn) -> None:
             _status_val = _row["maa_status"] or "Non-MAA"
             _sstyle = _STATUS_STYLE.get(_status_val, "color:#333")
             _c[_ci].markdown(
-                f"<p style='margin:0;font-size:0.85rem;padding-top:6px;{_sstyle}'>{_status_val}</p>",
+                f"<p style='margin:0;font-size:0.85rem;padding-top:9px;{_sstyle}'>{_status_val}</p>",
                 unsafe_allow_html=True,
             ); _ci += 1
             if _row["doctor_paid"] == 1:
