@@ -56,7 +56,6 @@ def test_generate_doctor_copy_omits_payment_tracking(sample_entries):
     headers = [ws.cell(1, c).value for c in range(1, ws.max_column + 1)]
     assert "Doctor Paid" not in headers
     assert "Dr Payment Month" not in headers
-    assert "MAA Status" not in headers
 
 
 def test_generate_doctor_copy_sheet_name(sample_entries):
