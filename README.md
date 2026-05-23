@@ -5,8 +5,8 @@ A web application for tracking hospital admission claims under the MAA (Mother's
 ## Features
 
 - **Dashboard** — Overview statistics, monthly approved vs paid bar chart, status breakdown
-- **Ingest** — Upload `GenericSearchReport*.csv` files with dry-run validation and change detection
-- **Admissions** — Filterable, paginated table with per-claim package details and Excel export
+- **Ingest** — Upload `GenericSearchReport*.csv` files with dry-run validation and change detection; or fetch directly from the MAA portal via browser session reuse
+- **Admissions** — Filterable, paginated table (name search + date/policy/status/speciality) with per-claim package details and Excel export
 - **Reports** — Multiple report types (Admission Summary, Monthly, Financial Year, Raw Export) as downloadable `.xlsx` files
 - **Doctor Share** — Per-doctor expense tracking with MAA claim linking, monthly filters, bulk mark-paid, and internal/doctor-copy Excel exports
 
@@ -14,11 +14,12 @@ A web application for tracking hospital admission claims under the MAA (Mother's
 
 ```
 app.py            Entry point: page config, DB connection, sidebar nav, routing
-utils.py          Shared UI helpers (fmt_inr)
+utils.py          Shared helpers (fmt_inr currency formatter)
 db.py             All database access (SQLite). Schema: claims + doctor_expenses
 ingest.py         CSV parsing and ingestion (CLI and library)
+fetch.py          MAA portal scraper — browser session reuse + Playwright fallback
 reports.py        In-memory .xlsx generation via openpyxl
-pages/
+ui/
   dashboard.py    Dashboard page
   ingest.py       Ingest page
   admissions.py   Admissions page

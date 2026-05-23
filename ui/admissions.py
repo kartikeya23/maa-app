@@ -1,10 +1,13 @@
 # pages/admissions.py
+import json
 from datetime import date
 
 import streamlit as st
 
 import db
 import reports
+
+_PAGE_SIZE = 50
 
 
 def render(conn) -> None:
@@ -14,11 +17,12 @@ def render(conn) -> None:
 
     with st.sidebar:
         st.subheader("Filters")
-        date_from  = st.date_input("From date", value=None)
-        date_to    = st.date_input("To date",   value=None)
-        pol_year   = st.selectbox("Policy Year", ["(all)"] + opts["policy_year"])
-        status     = st.selectbox("Status",      ["(all)"] + opts["status"])
-        speciality = st.selectbox("Speciality",  ["(all)"] + opts["pkg_speciality_name"])
+        name_search = st.text_input("Search name", placeholder="Patient name…")
+        date_from   = st.date_input("From date", value=None)
+        date_to     = st.date_input("To date",   value=None)
+        pol_year    = st.selectbox("Policy Year", ["(all)"] + opts["policy_year"])
+        status      = st.selectbox("Status",      ["(all)"] + opts["status"])
+        speciality  = st.selectbox("Speciality",  ["(all)"] + opts["pkg_speciality_name"])
 
     filters: dict = {}
     if date_from:
@@ -34,18 +38,44 @@ def render(conn) -> None:
 
     df = db.query_admissions(conn, filters)
 
+    if name_search:
+        df = df[df["patient_name"].str.contains(name_search, case=False, na=False)]
+
+    # Reset page when filters (including name search) change
+    _filter_hash = json.dumps({**filters, "_name": name_search}, sort_keys=True)
+    if st.session_state.get("adm_filters_hash") != _filter_hash:
+        st.session_state["adm_filters_hash"] = _filter_hash
+        st.session_state["adm_page_num"] = 1
+
     st.write(f"**{len(df):,} admissions** match the current filters.")
 
     if df.empty:
         st.info("No records found. Adjust filters or ingest data.")
     else:
-        PAGE_SIZE = 50
-        total_pages = max(1, (len(df) - 1) // PAGE_SIZE + 1)
-        page_num = st.number_input("Page", min_value=1, max_value=total_pages, value=1, step=1)
-        start    = (page_num - 1) * PAGE_SIZE
-        page_df  = df.iloc[start : start + PAGE_SIZE]
+        total_pages = max(1, (len(df) - 1) // _PAGE_SIZE + 1)
+        page_num = max(1, min(st.session_state.get("adm_page_num", 1), total_pages))
+        start    = (page_num - 1) * _PAGE_SIZE
+        page_df  = df.iloc[start : start + _PAGE_SIZE]
 
         st.dataframe(page_df, width='stretch', hide_index=True)
+
+        if total_pages > 1:
+            pc1, pc2, pc3 = st.columns([1, 4, 1])
+            if pc1.button("← Prev", disabled=(page_num <= 1), key="adm_prev", width="stretch"):
+                st.session_state["adm_page_num"] = page_num - 1
+                st.rerun()
+            row_end = min(start + _PAGE_SIZE, len(df))
+            pc2.markdown(
+                f"<div style='text-align:center;padding-top:6px;color:#666;font-size:0.9rem'>"
+                f"Page {page_num} of {total_pages} &ensp;·&ensp; rows {start + 1}–{row_end} of {len(df)}"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+            if pc3.button("Next →", disabled=(page_num >= total_pages), key="adm_next", width="stretch"):
+                st.session_state["adm_page_num"] = page_num + 1
+                st.rerun()
+
+        st.divider()
 
         selected_tid = st.text_input("Enter TID to view package details")
         if selected_tid:

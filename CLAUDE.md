@@ -28,12 +28,13 @@ python ingest.py
 
 ## Architecture
 
-The app has four files with clear separation of concerns:
-
+- **`app.py`** — Streamlit entry point. Page config, cached DB connection (`@st.cache_resource`), sidebar nav, page routing. 5 pages: Dashboard, Ingest, Admissions, Reports, Doctor Share.
 - **`db.py`** — All database access. Schema: `claims` table (PK: `tid, pkg_code, claim_number`) + `claims_hash` for upsert change detection via MD5. Financial year starts April 1 (`fy_of()`).
 - **`ingest.py`** — CSV parsing and ingestion. Handles unusual date formats (`parse_date_dmy`, `parse_payment_date`). Stores Aadhaar/ID/mobile numbers as text to preserve leading zeros.
+- **`fetch.py`** — MAA portal scraper. Reuses an existing browser session (cookies) for fast fetches; falls back to Playwright for a full login flow. Writes CSV cache files for offline reuse.
 - **`reports.py`** — In-memory `.xlsx` generation via openpyxl. Styled headers, color-coded rows (green=paid, amber=query), currency/date formatting, subtotals.
-- **`app.py`** — Streamlit UI with 4 pages: Dashboard, Ingest, Admissions (filterable + paginated), Reports. DB connection is `@st.cache_resource`; cache is cleared after ingestion.
+- **`utils.py`** — Shared helpers. `fmt_inr()` formats rupee amounts with Indian comma conventions.
+- **`ui/`** — One module per page: `dashboard`, `ingest`, `admissions`, `reports`, `doctor_share`.
 
 ## Key Domain Details
 

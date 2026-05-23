@@ -432,7 +432,10 @@ def render(conn) -> None:
         _PAGE_SIZE = 25
         _total_pages = max(1, (len(df_r) - 1) // _PAGE_SIZE + 1)
 
-        if "ds_page_num" not in st.session_state:
+        if st.session_state.get("ds_months_prev") != selected_months:
+            st.session_state["ds_months_prev"] = selected_months
+            st.session_state["ds_page_num"] = 1
+        elif "ds_page_num" not in st.session_state:
             st.session_state["ds_page_num"] = 1
         ds_page = max(1, min(st.session_state["ds_page_num"], _total_pages))
         _start = (ds_page - 1) * _PAGE_SIZE
