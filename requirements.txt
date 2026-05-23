@@ -3,3 +3,7 @@ streamlit>=1.35
 pandas>=2.0
 plotly>=5.0
 pytest>=8.0
+playwright>=1.44
+browser-cookie3>=0.19
+beautifulsoup4>=4.12
+requests>=2.31
