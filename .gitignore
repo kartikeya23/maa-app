@@ -23,6 +23,7 @@ maa.db
 
 # macOS files
 .DS_STORE
+*.app/
 
 # Python environment tools
 .python-version
