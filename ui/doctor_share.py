@@ -409,6 +409,45 @@ def render(conn) -> None:
 (function() {
     var doc = window.parent.document;
     var win = window.parent;
+
+    // ── help-icon tab-skip ────────────────────────────────────────────────────
+    // Streamlit renders help icons as <button> inside <span class="stTooltipIcon">.
+    // Remove them from the tab order so Tab moves between inputs only.
+    function _disableHelpTabIndex() {
+        doc.querySelectorAll('.stTooltipIcon button').forEach(function(btn) {
+            btn.setAttribute('tabindex', '-1');
+        });
+    }
+
+    // ── post-save refocus ─────────────────────────────────────────────────────
+    // After Cmd/Ctrl+Enter fires a save and the page rerenders, focus the
+    // "Search patient name" input so the next record can be typed immediately.
+    function _refocusSearch() {
+        if (!win._maa_focus_search) return;
+        var labels = doc.querySelectorAll('[data-testid="stTextInput"] label');
+        for (var i = 0; i < labels.length; i++) {
+            if (labels[i].textContent.includes('Search patient name')) {
+                var inp = labels[i].closest('[data-testid="stTextInput"]').querySelector('input');
+                if (inp) { inp.focus(); win._maa_focus_search = false; }
+                break;
+            }
+        }
+    }
+
+    // Debounced MutationObserver runs both tasks on every DOM change.
+    if (win._maa_dom_observer) { win._maa_dom_observer.disconnect(); }
+    var _timer;
+    win._maa_dom_observer = new MutationObserver(function() {
+        clearTimeout(_timer);
+        _timer = setTimeout(function() {
+            _disableHelpTabIndex();
+            _refocusSearch();
+        }, 80);
+    });
+    win._maa_dom_observer.observe(doc.body, { childList: true, subtree: true });
+    _disableHelpTabIndex();  // run once immediately for elements already in DOM
+
+    // ── Cmd/Ctrl+Enter → Save Entry ──────────────────────────────────────────
     if (win._maa_save_handler) {
         doc.removeEventListener('keydown', win._maa_save_handler);
     }
@@ -416,7 +455,11 @@ def render(conn) -> None:
         if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
             var btn = Array.from(doc.querySelectorAll('button'))
                           .find(function(b) { return b.innerText.trim() === 'Save Entry'; });
-            if (btn && !btn.disabled) { e.preventDefault(); btn.click(); }
+            if (btn && !btn.disabled) {
+                e.preventDefault();
+                win._maa_focus_search = true;
+                btn.click();
+            }
         }
     };
     doc.addEventListener('keydown', win._maa_save_handler);
