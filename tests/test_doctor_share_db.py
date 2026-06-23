@@ -283,3 +283,24 @@ def test_get_doctor_expense_months_filtered_by_doctor(mem_db):
     assert kavesh_months == ["2025-06"]
     x_months = db.get_doctor_expense_months(mem_db, "Dr. X")
     assert x_months == ["2025-07"]
+
+
+def test_get_doctor_expenses_filtered_by_doctor(mem_db_with_claims):
+    conn = mem_db_with_claims
+    conn.executemany(
+        """INSERT INTO doctor_expenses
+               (tid, patient_name, admission_date, month, doctor_name)
+           VALUES (?, ?, ?, ?, ?)""",
+        [
+            ("TID001", "Ravi Kumar",  "2025-06-15", "2025-06", "Dr. Kavesh"),
+            ("TID002", "Sunita Devi", "2025-06-10", "2025-06", "Dr. X"),
+        ],
+    )
+    conn.commit()
+    kavesh_df = db.get_doctor_expenses(conn, "2025-06", "Dr. Kavesh")
+    assert len(kavesh_df) == 1
+    assert kavesh_df.iloc[0]["patient_name"] == "Ravi Kumar"
+
+    x_df = db.get_doctor_expenses(conn, "2025-06", "Dr. X")
+    assert len(x_df) == 1
+    assert x_df.iloc[0]["patient_name"] == "Sunita Devi"

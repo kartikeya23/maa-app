@@ -523,13 +523,17 @@ def get_total_record_count(conn: sqlite3.Connection) -> int:
 
 # ── Doctor Share queries ──────────────────────────────────────────────────────
 
-def get_doctor_expenses(conn: sqlite3.Connection, months: str | list[str]) -> pd.DataFrame:
-    """Returns doctor_expenses for one or more months, joined with computed maa_payment and share fields."""
+def get_doctor_expenses(conn: sqlite3.Connection, months: str | list[str], doctor_name: str | None = None) -> pd.DataFrame:
+    """Returns doctor_expenses for one or more months, joined with computed maa_payment and share fields.
+    If doctor_name is given, scopes to that doctor only.
+    """
     if isinstance(months, str):
         months = [months]
     if not months:
         return pd.DataFrame()
     placeholders = ",".join("?" for _ in months)
+    doctor_clause = "AND de.doctor_name = ?" if doctor_name is not None else ""
+    params = months + ([doctor_name] if doctor_name is not None else [])
     sql = f"""
         SELECT
             de.id,
@@ -546,6 +550,7 @@ def get_doctor_expenses(conn: sqlite3.Connection, months: str | list[str]) -> pd
             de.maa_status,
             de.doctor_paid,
             de.doctor_payment_month,
+            de.doctor_name,
             CASE WHEN de.tid IS NOT NULL
                  THEN COALESCE(maa.net_paid, 0.0)
                  ELSE NULL END AS maa_payment
@@ -558,9 +563,10 @@ def get_doctor_expenses(conn: sqlite3.Connection, months: str | list[str]) -> pd
             GROUP BY tid
         ) maa ON de.tid = maa.tid
         WHERE de.month IN ({placeholders})
+        {doctor_clause}
         ORDER BY de.month ASC, de.id ASC
     """
-    df = pd.read_sql_query(sql, conn, params=months)
+    df = pd.read_sql_query(sql, conn, params=params)
     if df.empty:
         return df
 
