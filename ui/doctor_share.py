@@ -31,6 +31,11 @@ def _link_and_infer_status(conn, row_id: int, tid: str) -> None:
 
 @st.dialog("Entry Details", width="large")
 def _entry_detail_dialog(row_id: int, conn):
+    # Use row_id-prefixed keys so each patient has its own isolated session
+    # state namespace. This prevents stale values from a previously-open dialog
+    # bleeding into the next one regardless of how the previous dialog was closed.
+    _p = f"d{row_id}_"
+
     raw_rows = pd.read_sql_query(
         "SELECT * FROM doctor_expenses WHERE id = ?", conn, params=[row_id]
     )
@@ -57,7 +62,7 @@ def _entry_detail_dialog(row_id: int, conn):
     with tab_edit:
         n1, n2 = st.columns(2)
         new_patient_name = n1.text_input(
-            "Patient Name", value=str(r["patient_name"] or ""), key="d_patient_name"
+            "Patient Name", value=str(r["patient_name"] or ""), key=f"{_p}pname"
         )
         _adm_default = None
         try:
@@ -65,20 +70,20 @@ def _entry_detail_dialog(row_id: int, conn):
         except Exception:
             pass
         new_admission_date = n2.date_input(
-            "Admission Date", value=_adm_default, key="d_admission_date"
+            "Admission Date", value=_adm_default, key=f"{_p}adm"
         )
 
         c1, c2, c3 = st.columns(3)
-        new_hosp     = c1.number_input("Hospital Ex ₹",  value=float(r["hosp_ex"] or 0),     min_value=0.0, step=100.0, key="d_hosp",     help="Hospital expenses paid by the hospital (e.g. implants, consumables) — deducted before calculating doctor share.")
-        new_pharma   = c2.number_input("Pharmacy Ex ₹",  value=float(r["pharma_ex"] or 0),   min_value=0.0, step=100.0, key="d_pharma",   help="Pharmacy / medicine costs borne by the hospital — deducted before calculating doctor share.")
-        new_dialysis = c3.number_input("Dialysis Ex ₹",  value=float(r["dialysis_ex"] or 0), min_value=0.0, step=100.0, key="d_dialysis", help="Dialysis session costs borne by the hospital — deducted before calculating doctor share.")
+        new_hosp     = c1.number_input("Hospital Ex ₹",  value=float(r["hosp_ex"] or 0),     min_value=0.0, step=100.0, key=f"{_p}hosp",     help="Hospital expenses paid by the hospital (e.g. implants, consumables) — deducted before calculating doctor share.")
+        new_pharma   = c2.number_input("Pharmacy Ex ₹",  value=float(r["pharma_ex"] or 0),   min_value=0.0, step=100.0, key=f"{_p}pharma",   help="Pharmacy / medicine costs borne by the hospital — deducted before calculating doctor share.")
+        new_dialysis = c3.number_input("Dialysis Ex ₹",  value=float(r["dialysis_ex"] or 0), min_value=0.0, step=100.0, key=f"{_p}dialysis", help="Dialysis session costs borne by the hospital — deducted before calculating doctor share.")
 
         d1, d2 = st.columns(2)
         new_pct      = d1.number_input("Doctor %", value=float(r["doctor_pct"] or 0.4) * 100,
-                                       min_value=0.0, max_value=100.0, step=5.0, key="d_pct",
+                                       min_value=0.0, max_value=100.0, step=5.0, key=f"{_p}pct",
                                        help="Percentage of (MAA payment − expenses) paid to the doctor; used only when no flat override is set.") / 100.0
         new_flat_raw = d2.number_input("Flat Override ₹ (0 = use %)",
-                                       value=float(r["doctor_flat"] or 0), min_value=0.0, step=500.0, key="d_flat",
+                                       value=float(r["doctor_flat"] or 0), min_value=0.0, step=500.0, key=f"{_p}flat",
                                        help="Fixed rupee amount for doctor; if set, this replaces the percentage calculation entirely.")
         new_flat = new_flat_raw if new_flat_raw > 0 else None
 
@@ -87,24 +92,24 @@ def _entry_detail_dialog(row_id: int, conn):
         if cur_status not in maa_status_opts:
             maa_status_opts.append(cur_status)
         new_maa_status = st.selectbox("MAA Status", maa_status_opts,
-                                      index=maa_status_opts.index(cur_status), key="d_maa_status",
+                                      index=maa_status_opts.index(cur_status), key=f"{_p}status",
                                       help="Current stage of the MAA claim: Claim Raised → Claim Approved → Claim Paid.")
-        new_comments   = st.text_input("Comments", value=r["comments"] or "", key="d_comments",
+        new_comments   = st.text_input("Comments", value=r["comments"] or "", key=f"{_p}comments",
                                        help="Any additional notes about this entry (e.g. pending documents, special arrangements).")
 
         with st.expander("⚙️ Advanced"):
             adv1, adv2 = st.columns(2)
             new_filing_month = adv1.text_input(
-                "Filing Month (YYYY-MM)", value=str(r["month"]), key="d_filing_month",
+                "Filing Month (YYYY-MM)", value=str(r["month"]), key=f"{_p}month",
                 help="Moves this entry to a different month bucket.",
             )
             new_doctor_paid = adv2.checkbox(
-                "Paid to Doctor", value=bool(r["doctor_paid"]), key="d_doctor_paid",
+                "Paid to Doctor", value=bool(r["doctor_paid"]), key=f"{_p}paid",
                 help="Tick once the doctor's share has been physically paid out.",
             )
             new_pay_month = st.text_input(
                 "Payment Month (YYYY-MM)", value=r["doctor_payment_month"] or "",
-                key="d_pay_month", help="Month in which payment was made to the doctor.",
+                key=f"{_p}paymonth", help="Month in which payment was made to the doctor.",
             )
 
         tot_ex = new_hosp + new_pharma + new_dialysis
@@ -120,7 +125,7 @@ def _entry_detail_dialog(row_id: int, conn):
         if share is not None and share < 0:
             st.warning("Doctor share is negative — expenses exceed MAA payment.")
 
-        if st.button("💾 Save Changes", type="primary", key="d_save"):
+        if st.button("💾 Save Changes", type="primary", key=f"{_p}save"):
             db.update_doctor_expense(conn, row_id, {
                 "patient_name":         new_patient_name or None,
                 "admission_date":       str(new_admission_date) if new_admission_date else None,
@@ -135,10 +140,8 @@ def _entry_detail_dialog(row_id: int, conn):
                 "doctor_paid":          1 if new_doctor_paid else 0,
                 "doctor_payment_month": new_pay_month or None,
             })
-            for _k in ["d_patient_name", "d_admission_date", "d_hosp", "d_pharma",
-                        "d_dialysis", "d_pct", "d_flat", "d_maa_status",
-                        "d_filing_month", "d_doctor_paid", "d_pay_month", "d_comments"]:
-                st.session_state.pop(_k, None)
+            for _sk in [k for k in st.session_state if k.startswith(_p)]:
+                st.session_state.pop(_sk, None)
             st.success("Saved.")
 
     with tab_maa:
@@ -169,17 +172,17 @@ def _entry_detail_dialog(row_id: int, conn):
                 inferred = db.infer_maa_status(conn, tid)
                 if inferred:
                     db.update_doctor_expense(conn, row_id, {"maa_status": inferred})
-            _ba1.button("🔄 Auto-detect Status", key="d_autodetect", on_click=_auto_detect_status)
+            _ba1.button("🔄 Auto-detect Status", key=f"{_p}autodetect", on_click=_auto_detect_status)
             _ba2.button(
-                "🔗 Unlink TID", key="d_unlink",
+                "🔗 Unlink TID", key=f"{_p}unlink",
                 on_click=db.update_doctor_expense,
                 args=(conn, row_id, {"tid": None}),
             )
         else:
             st.info("No MAA claim linked. Search below to find and link a matching admission.")
-            src_name   = st.text_input("Search by name", value=str(r["patient_name"] or ""), key="d_src",
+            src_name   = st.text_input("Search by name", value=str(r["patient_name"] or ""), key=f"{_p}src",
                                        help="Type the patient's name as it appears in the MAA portal to find their TID.")
-            src_expand = st.checkbox("Expand search to ±1 month", key="d_expand",
+            src_expand = st.checkbox("Expand search to ±1 month", key=f"{_p}expand",
                                      help="Also search admissions from the month before and after the filing month when no exact-month match is found.")
             if src_name:
                 candidates = db.search_claims_for_matching(conn, src_name, r["month"], expand=src_expand)
@@ -190,10 +193,10 @@ def _entry_detail_dialog(row_id: int, conn):
                         for c in candidates
                     ]
                     idx = st.radio("Matching admissions", range(len(lbl)),
-                                   format_func=lambda i: lbl[i], key="d_cand")
+                                   format_func=lambda i: lbl[i], key=f"{_p}cand")
                     chosen = candidates[idx]
                     st.button(
-                        "🔗 Link to this admission", type="primary", key="d_link",
+                        "🔗 Link to this admission", type="primary", key=f"{_p}link",
                         on_click=_link_and_infer_status,
                         args=(conn, row_id, chosen["tid"]),
                     )
