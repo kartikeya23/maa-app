@@ -349,11 +349,19 @@ def get_available_months(conn: sqlite3.Connection) -> list[str]:
     return [r[0] for r in rows if r[0]]
 
 
-def get_doctor_expense_months(conn: sqlite3.Connection) -> list[str]:
-    """Returns distinct months present in doctor_expenses, newest first."""
-    rows = conn.execute(
-        "SELECT DISTINCT month FROM doctor_expenses ORDER BY month DESC"
-    ).fetchall()
+def get_doctor_expense_months(conn: sqlite3.Connection, doctor_name: str | None = None) -> list[str]:
+    """Returns distinct months present in doctor_expenses, newest first.
+    If doctor_name is given, scopes to that doctor only.
+    """
+    if doctor_name is not None:
+        rows = conn.execute(
+            "SELECT DISTINCT month FROM doctor_expenses WHERE doctor_name = ? ORDER BY month DESC",
+            (doctor_name,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT DISTINCT month FROM doctor_expenses ORDER BY month DESC"
+        ).fetchall()
     return [r[0] for r in rows]
 
 

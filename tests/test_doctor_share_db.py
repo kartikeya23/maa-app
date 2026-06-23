@@ -268,3 +268,18 @@ def test_doctor_name_migration_idempotent(mem_db):
     """Running init_db a second time must not raise even though column already exists."""
     db.init_db(":memory:")
     # The real migration guard is in init_db for on-disk DBs; this verifies no crash
+
+
+def test_get_doctor_expense_months_filtered_by_doctor(mem_db):
+    mem_db.executemany(
+        "INSERT INTO doctor_expenses (patient_name, admission_date, month, doctor_name) VALUES (?, ?, ?, ?)",
+        [
+            ("Patient A", "2025-06-01", "2025-06", "Dr. Kavesh"),
+            ("Patient B", "2025-07-01", "2025-07", "Dr. X"),
+        ],
+    )
+    mem_db.commit()
+    kavesh_months = db.get_doctor_expense_months(mem_db, "Dr. Kavesh")
+    assert kavesh_months == ["2025-06"]
+    x_months = db.get_doctor_expense_months(mem_db, "Dr. X")
+    assert x_months == ["2025-07"]
