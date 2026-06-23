@@ -10,6 +10,11 @@ import db
 import reports
 from utils import fmt_inr
 
+DOCTORS: dict[str, float] = {
+    "Dr. Kavesh": 0.40,
+    "Dr. X":      0.35,
+}
+
 
 def _link_and_infer_status(conn, row_id: int, tid: str) -> None:
     inferred = db.infer_maa_status(conn, tid)
@@ -211,12 +216,12 @@ def _confirm_delete_dialog(ids: list[int], conn):
 
 
 def render(conn) -> None:
-    st.title("Doctor Share — Dr. Kavesh")
-
-    available_months = db.get_doctor_expense_months(conn)
-
     with st.sidebar:
         st.subheader("Filters")
+        selected_doctor = st.selectbox(
+            "Doctor", list(DOCTORS.keys()), key="ds_doctor",
+        )
+        available_months = db.get_doctor_expense_months(conn, selected_doctor)
         months_asc = sorted(available_months)
         if months_asc:
             _month_mode = st.radio(
@@ -252,7 +257,9 @@ def render(conn) -> None:
         paid_filter = st.selectbox("Doctor Paid", ["All", "Paid", "Unpaid"],
                                    help="Filter by whether the doctor's share has been paid out.")
 
-    full_df = db.get_doctor_expenses(conn, selected_months) if selected_months else pd.DataFrame()
+    st.title(f"Doctor Share — {selected_doctor}")
+
+    full_df = db.get_doctor_expenses(conn, selected_months, selected_doctor) if selected_months else pd.DataFrame()
 
     df = full_df.copy()
     if not df.empty:
@@ -323,8 +330,9 @@ def render(conn) -> None:
                 dialysis_ex = c3.number_input("Dialysis Ex ₹",  min_value=0, value=0, step=100, format="%d", key="ae_dialysis",
                                               help="Dialysis session costs borne by the hospital — deducted before calculating doctor share.")
                 doctor_pct_input = st.number_input(
-                    "Doctor % (default 40%)", min_value=0.0, max_value=100.0,
-                    value=40.0, step=5.0, key="ae_pct",
+                    "Doctor % (default)", min_value=0.0, max_value=100.0,
+                    value=DOCTORS[selected_doctor] * 100,
+                    step=5.0, key="ae_pct",
                     help="Percentage of (MAA payment − expenses) that goes to the doctor; overridden if a flat amount is entered below.",
                 ) / 100.0
                 doctor_flat_raw = st.number_input("Flat override ₹ (0 = use %)", min_value=0, value=0, step=500, format="%d", key="ae_flat",
@@ -353,6 +361,7 @@ def render(conn) -> None:
                         doctor_pct=doctor_pct_input, doctor_flat=flat_val,
                         comments=comments_input or None,
                         maa_status=db.infer_maa_status(conn, chosen["tid"]), tid=chosen["tid"],
+                        doctor_name=selected_doctor,
                     )
                     st.success(f"Added entry for {chosen['patient_name']}.")
                     for _k in ["ae_search", "ae_hosp", "ae_pharma", "ae_dialysis",
@@ -386,6 +395,7 @@ def render(conn) -> None:
                             admission_date=str(nm_date),
                             hosp_ex=nm_hosp, pharma_ex=nm_pharma, dialysis_ex=nm_dialysis,
                             doctor_flat=nm_share, comments=nm_comments or None, tid=None,
+                            doctor_name=selected_doctor,
                         )
                         st.success(f"Added non-MAA entry for {nm_name}.")
                         st.rerun()
