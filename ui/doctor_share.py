@@ -172,6 +172,7 @@ def _entry_detail_dialog(row_id: int, conn):
                 inferred = db.infer_maa_status(conn, tid)
                 if inferred:
                     db.update_doctor_expense(conn, row_id, {"maa_status": inferred})
+                    st.session_state[f"{_p}status"] = inferred
             _ba1.button("🔄 Auto-detect Status", key=f"{_p}autodetect", on_click=_auto_detect_status)
             _ba2.button(
                 "🔗 Unlink TID", key=f"{_p}unlink",

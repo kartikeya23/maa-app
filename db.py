@@ -638,20 +638,20 @@ def search_claims_for_matching(
 def infer_maa_status(conn: sqlite3.Connection, tid: str) -> str | None:
     """Infer a single maa_status from all claims packages for a TID.
 
-    Considers only packages with approved_amount > 0.
-    Priority:
+    Priority (non-zero approved_amount packages take precedence):
       paid + pending  → Claim Approved  (partial payment, more outstanding)
       pending only    → Claim Raised
       paid (any mix)  → Claim Paid
       approved (any)  → Claim Approved
       all rejected    → Rejected
-    Returns None if no non-zero claims exist.
+    When no packages have a non-zero approved_amount yet (claim raised but not
+    approved), falls back to all rows: all-rejected → Rejected, else Claim Raised.
+    Returns None only when the TID has no rows in claims at all.
     """
     rows = conn.execute(
         "SELECT status, approved_amount FROM claims WHERE tid = ?", (tid,)
     ).fetchall()
-    non_zero = [(s, a) for s, a in rows if (a or 0) > 0]
-    if not non_zero:
+    if not rows:
         return None
 
     def _cat(s: str) -> str:
@@ -665,6 +665,12 @@ def infer_maa_status(conn: sqlite3.Connection, tid: str) -> str | None:
         if "approved" in sl:
             return "approved"
         return "pending"
+
+    non_zero = [(s, a) for s, a in rows if (a or 0) > 0]
+    if not non_zero:
+        # Claim exists but no approved amount yet — raised but not yet approved.
+        all_cats = {_cat(s) for s, _ in rows}
+        return "Rejected" if all_cats == {"rejected"} else "Claim Raised"
 
     cats = {_cat(s) for s, _ in non_zero}
     if "paid" in cats and "pending" in cats:
