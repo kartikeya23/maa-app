@@ -617,18 +617,19 @@ def render(conn) -> None:
         _sorted_months = sorted(selected_months)
         month_label = " · ".join(reports.month_label(m) for m in _sorted_months)
         _sheet_label = reports.compact_month_range(_sorted_months)
+        _doc_slug = selected_doctor.replace("Dr. ", "Dr").replace(" ", "")
         col_int, col_doc = st.columns(2)
         with col_int:
             st.download_button(
                 label=f"Download Internal Export — {month_label}",
                 data=reports.generate_doctor_internal(full_df, _sheet_label),
-                file_name=f"DoctorShare_Internal_{'_'.join(_sorted_months)}.xlsx",
+                file_name=f"DoctorShare_Internal_{_doc_slug}_{'_'.join(_sorted_months)}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
         with col_doc:
             st.download_button(
                 label=f"Download Doctor Copy — {month_label}",
                 data=reports.generate_doctor_copy(full_df, _sheet_label),
-                file_name=f"DoctorShare_DrKavesh_{'_'.join(_sorted_months)}.xlsx",
+                file_name=f"DoctorShare_{_doc_slug}_{'_'.join(_sorted_months)}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
