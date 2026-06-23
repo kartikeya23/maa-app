@@ -304,3 +304,41 @@ def test_get_doctor_expenses_filtered_by_doctor(mem_db_with_claims):
     x_df = db.get_doctor_expenses(conn, "2025-06", "Dr. X")
     assert len(x_df) == 1
     assert x_df.iloc[0]["patient_name"] == "Sunita Devi"
+
+
+def test_save_doctor_expense_stores_doctor_name(mem_db_with_claims):
+    conn = mem_db_with_claims
+    row_id = db.save_doctor_expense(
+        conn, month="2025-06", patient_name="Ravi Kumar",
+        admission_date="2025-06-15", tid="TID001", doctor_name="Dr. X",
+    )
+    stored = conn.execute(
+        "SELECT doctor_name FROM doctor_expenses WHERE id = ?", (row_id,)
+    ).fetchone()[0]
+    assert stored == "Dr. X"
+
+
+def test_save_doctor_expense_defaults_to_kavesh(mem_db):
+    row_id = db.save_doctor_expense(
+        mem_db, month="2025-06", patient_name="Cash Patient",
+        admission_date="2025-06-20", doctor_flat=3000.0,
+    )
+    stored = mem_db.execute(
+        "SELECT doctor_name FROM doctor_expenses WHERE id = ?", (row_id,)
+    ).fetchone()[0]
+    assert stored == "Dr. Kavesh"
+
+
+def test_update_doctor_expense_doctor_name(mem_db):
+    conn = mem_db
+    conn.execute(
+        "INSERT INTO doctor_expenses (patient_name, admission_date, month, doctor_name) VALUES (?, ?, ?, ?)",
+        ("Patient A", "2025-06-01", "2025-06", "Dr. Kavesh"),
+    )
+    conn.commit()
+    row_id = conn.execute("SELECT id FROM doctor_expenses").fetchone()[0]
+    db.update_doctor_expense(conn, row_id, {"doctor_name": "Dr. X"})
+    stored = conn.execute(
+        "SELECT doctor_name FROM doctor_expenses WHERE id = ?", (row_id,)
+    ).fetchone()[0]
+    assert stored == "Dr. X"

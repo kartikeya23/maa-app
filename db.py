@@ -693,17 +693,18 @@ def save_doctor_expense(
     comments: str | None = None,
     maa_status: str | None = None,
     tid: str | None = None,
+    doctor_name: str = "Dr. Kavesh",
 ) -> int:
     """Insert a new doctor_expenses row. Returns the new row id."""
     cursor = conn.execute(
         """INSERT INTO doctor_expenses
                (tid, patient_name, admission_date, month,
                 hosp_ex, pharma_ex, dialysis_ex, doctor_pct, doctor_flat,
-                comments, maa_status)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                comments, maa_status, doctor_name)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (tid, patient_name, admission_date, month,
          hosp_ex, pharma_ex, dialysis_ex, doctor_pct, doctor_flat,
-         comments, maa_status),
+         comments, maa_status, doctor_name),
     )
     conn.commit()
     return cursor.lastrowid
@@ -713,12 +714,12 @@ def update_doctor_expense(conn: sqlite3.Connection, row_id: int, fields: dict) -
     """Update fields on a doctor_expenses row.
     Allowed keys: hosp_ex, pharma_ex, dialysis_ex, doctor_pct, doctor_flat, comments,
                   doctor_payment_month, maa_status, tid, patient_name, admission_date,
-                  month, doctor_paid.
+                  month, doctor_paid, doctor_name.
     """
     allowed = {
         "hosp_ex", "pharma_ex", "dialysis_ex", "doctor_pct", "doctor_flat", "comments",
         "doctor_payment_month", "maa_status", "tid", "patient_name", "admission_date",
-        "month", "doctor_paid",
+        "month", "doctor_paid", "doctor_name",
     }
     updates = {k: v for k, v in fields.items() if k in allowed}
     if not updates:
