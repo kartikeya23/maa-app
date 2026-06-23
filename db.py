@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS doctor_expenses (
     maa_status           TEXT,
     doctor_paid          INTEGER DEFAULT 0,
     doctor_payment_month TEXT,
+    doctor_name          TEXT NOT NULL DEFAULT 'Dr. Kavesh',
     created_at           TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at           TEXT DEFAULT CURRENT_TIMESTAMP
 );
@@ -142,6 +143,13 @@ def init_db(path: str | Path = DB_PATH) -> sqlite3.Connection:
     conn.executescript(DDL)
     conn.executescript(HASH_DDL)
     conn.executescript(DOCTOR_EXPENSES_DDL)
+    try:
+        conn.execute(
+            "ALTER TABLE doctor_expenses ADD COLUMN doctor_name TEXT NOT NULL DEFAULT 'Dr. Kavesh'"
+        )
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # column already exists (fresh DB or second run)
     conn.commit()
     return conn
 

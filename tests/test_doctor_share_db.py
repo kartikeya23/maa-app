@@ -15,7 +15,7 @@ def test_doctor_expenses_columns(mem_db):
         "id", "tid", "patient_name", "admission_date", "month",
         "hosp_ex", "pharma_ex", "dialysis_ex", "doctor_pct", "doctor_flat",
         "comments", "maa_status", "doctor_paid", "doctor_payment_month",
-        "created_at", "updated_at",
+        "created_at", "updated_at", "doctor_name",
     ]:
         assert expected in cols, f"Missing column: {expected}"
 
@@ -262,3 +262,9 @@ def test_unmark_doctor_paid(mem_db):
     rows = conn.execute("SELECT doctor_paid, doctor_payment_month FROM doctor_expenses").fetchall()
     assert all(r[0] == 0 for r in rows)
     assert all(r[1] is None for r in rows)
+
+
+def test_doctor_name_migration_idempotent(mem_db):
+    """Running init_db a second time must not raise even though column already exists."""
+    db.init_db(":memory:")
+    # The real migration guard is in init_db for on-disk DBs; this verifies no crash
