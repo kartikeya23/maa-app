@@ -92,8 +92,8 @@ DOCTOR_INTERNAL_COLS = [
     ("Dialysis Ex",       "dialysis_ex",          RUPEE_FMT),
     ("Total Ex",          "total_ex",             RUPEE_FMT),
     ("MAA Payment",       "maa_payment",          RUPEE_FMT),
-    ("Doctor Share",      "doctor_share",         RUPEE_FMT),
     ("Hospital Share",    "hospital_share",       RUPEE_FMT),
+    ("Doctor Share",      "doctor_share",         RUPEE_FMT),
     ("MAA Status",        "maa_status",           None),
     ("Doctor Paid",       "doctor_paid_label",    None),
     ("Dr Payment Month",  "doctor_payment_month", None),
@@ -109,8 +109,8 @@ DOCTOR_COPY_COLS = [
     ("Dialysis Ex",       "dialysis_ex",          RUPEE_FMT),
     ("Total Ex",          "total_ex",             RUPEE_FMT),
     ("MAA Payment",       "maa_payment",          RUPEE_FMT),
-    ("Doctor Share",      "doctor_share",         RUPEE_FMT),
     ("Hospital Share",    "hospital_share",       RUPEE_FMT),
+    ("Doctor Share",      "doctor_share",         RUPEE_FMT),
     ("MAA Status",        "maa_status",           None),
     ("Comments",          "comments",             None),
 ]
@@ -406,8 +406,8 @@ _SECTION_HDR_FONT = Font(bold=True, color="1F3864", name="Calibri")
 
 # Column index within DOCTOR_INTERNAL_COLS (1-based) → field name
 _DOCTOR_NUMERIC_COLS = {4: "hosp_ex", 5: "pharma_ex", 6: "dialysis_ex",
-                        7: "total_ex", 8: "maa_payment", 9: "doctor_share",
-                        10: "hospital_share"}
+                        7: "total_ex", 8: "maa_payment", 9: "hospital_share",
+                        10: "doctor_share"}
 
 
 def _write_doctor_status_totals(ws, df: pd.DataFrame, n_cols: int | None = None) -> None:
