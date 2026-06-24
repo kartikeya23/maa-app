@@ -67,3 +67,6 @@ cache/
 
 # Local config — doctor names and default rates (edit doctors.toml directly)
 doctors.toml
+
+# Visual brainstorming sessions
+.superpowers/
