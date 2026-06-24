@@ -1,6 +1,6 @@
 # MAA Payment Record Manager
 
-A web application for tracking hospital admission claims under the MAA (Mother's Absolute Affection) health insurance scheme. Supports CSV ingestion, claim browsing with filters, and Excel report generation.
+A web application for tracking hospital admission claims under the MAA (Mother's Absolute Affection) health insurance scheme. Supports CSV ingestion, claim browsing with filters, Excel report generation, and per-doctor expense tracking.
 
 ## Features
 
@@ -8,23 +8,25 @@ A web application for tracking hospital admission claims under the MAA (Mother's
 - **Ingest** — Upload `GenericSearchReport*.csv` files with dry-run validation and change detection; or fetch directly from the MAA portal via browser session reuse
 - **Admissions** — Filterable, paginated table (name search + date/policy/status/speciality) with per-claim package details and Excel export
 - **Reports** — Multiple report types (Admission Summary, Monthly, Financial Year, Raw Export) as downloadable `.xlsx` files
-- **Doctor Share** — Per-doctor expense tracking with MAA claim linking, monthly filters, bulk mark-paid, and internal/doctor-copy Excel exports
+- **Doctor Share** — Per-doctor expense tracking with MAA claim linking, auto-status detection, monthly/range filters, bulk mark-paid, and internal/doctor-copy Excel exports
 
 ## Architecture
 
 ```
-app.py            Entry point: page config, DB connection, sidebar nav, routing
-utils.py          Shared helpers (fmt_inr currency formatter)
-db.py             All database access (SQLite). Schema: claims + doctor_expenses
-ingest.py         CSV parsing and ingestion (CLI and library)
-fetch.py          MAA portal scraper — browser session reuse + Playwright fallback
-reports.py        In-memory .xlsx generation via openpyxl
+app.py                Entry point: page config, DB connection, sidebar nav, routing
+utils.py              Shared helpers (fmt_inr currency formatter)
+db.py                 All database access (SQLite). Schema: claims + doctor_expenses
+ingest.py             CSV parsing and ingestion (CLI and library)
+fetch.py              MAA portal scraper — browser session reuse + Playwright fallback
+reports.py            In-memory .xlsx generation via openpyxl
+doctors.toml          Local config: doctor names and default fee percentages (gitignored)
+doctors.toml.example  Template for doctors.toml
 ui/
-  dashboard.py    Dashboard page
-  ingest.py       Ingest page
-  admissions.py   Admissions page
-  reports.py      Reports page
-  doctor_share.py Doctor Share page + entry/delete dialogs
+  dashboard.py        Dashboard page
+  ingest.py           Ingest page
+  admissions.py       Admissions page
+  reports.py          Reports page
+  doctor_share.py     Doctor Share page + entry/delete dialogs
 ```
 
 ## Setup
@@ -33,6 +35,13 @@ ui/
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+```
+
+Copy and configure the doctor list:
+
+```bash
+cp doctors.toml.example doctors.toml
+# Edit doctors.toml with your doctor names and default fee percentages
 ```
 
 ## Running
@@ -56,6 +65,20 @@ python ingest.py --dry-run
 python ingest.py
 ```
 
+## Configuration
+
+### doctors.toml
+
+Doctor names and their default fee percentages are stored in `doctors.toml` (gitignored, not committed). Copy `doctors.toml.example` and edit:
+
+```toml
+[doctors]
+"Dr. Smith" = 0.40
+"Dr. Jones" = 0.35
+```
+
+The percentage is applied to `(MAA payment − expenses)` when no flat override is set on an entry. Restart the app after editing.
+
 ## Tech Stack
 
 - [Streamlit](https://streamlit.io) — Web UI
@@ -63,3 +86,4 @@ python ingest.py
 - [pandas](https://pandas.pydata.org) — Data manipulation
 - [openpyxl](https://openpyxl.readthedocs.io) — Excel report generation
 - [Plotly](https://plotly.com/python/) — Charts
+- [Playwright](https://playwright.dev/python/) — MAA portal scraping (optional)

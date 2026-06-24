@@ -1,0 +1,8 @@
+# Copy this file to doctors.toml and edit for your setup.
+# Doctor names and their default fee percentages.
+# default_pct is the fraction of (MAA payment − expenses) paid to the doctor
+# when no flat override is set on an entry.
+
+[doctors]
+"Dr. Example"  = 0.40
+"Dr. Example2" = 0.35
