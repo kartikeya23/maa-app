@@ -64,3 +64,6 @@ Thumbs.db
 
 # Portal fetch cache
 cache/
+
+# Local config — doctor names and default rates (edit doctors.toml directly)
+doctors.toml

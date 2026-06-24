@@ -1,6 +1,12 @@
 # ui/doctor_share.py
 import re
 from datetime import date as _date
+from pathlib import Path
+
+try:
+    import tomllib
+except ImportError:
+    import tomli as tomllib  # type: ignore[no-redef]
 
 import pandas as pd
 import streamlit as st
@@ -10,10 +16,12 @@ import db
 import reports
 from utils import fmt_inr
 
-DOCTORS: dict[str, float] = {
-    "Dr. Kavesh": 0.40,
-    "Dr. X":      0.35,
-}
+def _load_doctors() -> dict[str, float]:
+    cfg = Path(__file__).parent.parent / "doctors.toml"
+    with open(cfg, "rb") as f:
+        return tomllib.load(f)["doctors"]
+
+DOCTORS: dict[str, float] = _load_doctors()
 
 
 def _link_and_infer_status(conn, row_id: int, tid: str) -> None:
