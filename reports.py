@@ -138,7 +138,8 @@ def _write_sheet(ws, df: pd.DataFrame, col_defs: list[tuple], title: str,
                  status_col_idx: int | None = None,
                  color_by_maa_status: bool = False,
                  freeze_panes: str = "A2",
-                 header_fill=None, header_font=None):
+                 header_fill=None, header_font=None,
+                 total_label: str = "TOTAL"):
     """Write headers + data + summary row into ws."""
     ws.title = title[:31]  # Excel sheet name limit
 
@@ -198,7 +199,7 @@ def _write_sheet(ws, df: pd.DataFrame, col_defs: list[tuple], title: str,
     # Summary row
     last_data_row = len(df) + 1
     summary_row   = last_data_row + 1
-    ws.cell(row=summary_row, column=1, value="TOTAL").font = TOTAL_FONT
+    ws.cell(row=summary_row, column=1, value=total_label).font = TOTAL_FONT
 
     for ci, (key, fmt) in enumerate(zip(db_keys, fmts), 1):
         if key in SUMMABLE_COLS and pd.api.types.is_numeric_dtype(df[key]) if key in df.columns else False:
@@ -333,7 +334,7 @@ def _generate_detail_report(df: pd.DataFrame, sheet_title: str) -> bytes:
         current_row += 1
 
     # Grand total row
-    gt_vals = {1: "GRAND TOTAL", 5: grand_paid, 6: grand_received, 7: grand_approved, 8: grand_rejected}
+    gt_vals = {1: "GRAND TOTAL — All Months", 5: grand_paid, 6: grand_received, 7: grand_approved, 8: grand_rejected}
     for ci in range(1, num_cols + 1):
         cell = ws.cell(row=current_row, column=ci, value=gt_vals.get(ci, ""))
         cell.fill = HEADER_FILL
@@ -368,13 +369,14 @@ def generate_report(df: pd.DataFrame, title: str, report_type: str) -> bytes:
     ws = wb.active
 
     if report_type == "admission_report":
-        _write_sheet(ws, df, ADMISSION_COLS, title, status_col_idx=12)
+        _write_sheet(ws, df, ADMISSION_COLS, title, status_col_idx=12,
+                    total_label="TOTAL — All Admissions")
 
     elif report_type == "monthly_summary":
-        _write_sheet(ws, df, MONTHLY_COLS, title)
+        _write_sheet(ws, df, MONTHLY_COLS, title, total_label="TOTAL — All Months")
 
     elif report_type == "fy_summary":
-        _write_sheet(ws, df, FY_COLS, title)
+        _write_sheet(ws, df, FY_COLS, title, total_label="TOTAL — All Financial Years")
 
     elif report_type == "raw_export":
         # Use all columns from the DataFrame as-is
@@ -382,7 +384,7 @@ def generate_report(df: pd.DataFrame, title: str, report_type: str) -> bytes:
         for col in df.columns:
             fmt = RUPEE_FMT if col in AMOUNT_COLS else None
             col_defs.append((col.replace("_", " ").title(), col, fmt))
-        _write_sheet(ws, df, col_defs, title)
+        _write_sheet(ws, df, col_defs, title, total_label="TOTAL — All Records")
 
     else:
         raise ValueError(f"Unknown report_type: {report_type}")
@@ -394,7 +396,6 @@ def generate_report(df: pd.DataFrame, title: str, report_type: str) -> bytes:
 
 def _prepare_doctor_df(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy().reset_index(drop=True)
-    out["no"] = range(1, len(out) + 1)
     # NULL and 0 both map to "No" — intentional, NULL means payment not yet recorded
     out["doctor_paid_label"] = out["doctor_paid"].apply(lambda x: "Yes" if x else "No")
     return out
@@ -410,8 +411,28 @@ _DOCTOR_NUMERIC_COLS = {4: "hosp_ex", 5: "pharma_ex", 6: "dialysis_ex",
                         10: "doctor_share"}
 
 
-def _write_doctor_status_totals(ws, df: pd.DataFrame, n_cols: int | None = None) -> None:
-    """Append status-wise subtotals for doctor-not-yet-paid entries."""
+def _write_doctor_summary_row(ws, row_num: int, label: str, sub: pd.DataFrame, fill, n_cols: int) -> None:
+    """Write one labeled count+sums row (used by the outstanding/payments summary blocks)."""
+    ws.cell(row=row_num, column=1, value=label).font = TOTAL_FONT
+    ws.cell(row=row_num, column=2,
+            value=f"({len(sub)} {'entry' if len(sub) == 1 else 'entries'})"
+            ).font = Font(italic=True, name="Calibri")
+    for col_idx, field in _DOCTOR_NUMERIC_COLS.items():
+        if field in sub.columns:
+            val = sub[field].fillna(0).sum()
+            cell = ws.cell(row=row_num, column=col_idx, value=val)
+            cell.number_format = RUPEE_FMT
+            cell.font = TOTAL_FONT
+    for ci in range(1, n_cols + 1):
+        ws.cell(row=row_num, column=ci).fill = fill
+
+
+def _write_doctor_outstanding_summary(ws, df: pd.DataFrame, n_cols: int | None = None) -> None:
+    """Append status-wise subtotals for doctor-not-yet-paid entries.
+
+    A claim being Rejected doesn't waive the doctor's share — it's still owed —
+    so "Rejected" is broken out as its own risk flag, not excluded from the total.
+    """
     unpaid = df[df["doctor_paid"] == 0].copy()
     if unpaid.empty:
         return
@@ -429,27 +450,142 @@ def _write_doctor_status_totals(ws, df: pd.DataFrame, n_cols: int | None = None)
     start_row += 1
 
     sections = [
-        ("Claim Paid",   unpaid[unpaid["maa_status"] == "Claim Paid"],  _SUBTOTAL_FILL),
-        ("Rejected",     unpaid[unpaid["maa_status"] == "Rejected"],     _REJECTED_FILL),
-        ("Total Unpaid", unpaid,                                         TOTAL_FILL),
+        ("Claim Paid — Dr Share Due",       unpaid[unpaid["maa_status"] == "Claim Paid"], _SUBTOTAL_FILL),
+        ("Rejected — Dr Share Still Due",   unpaid[unpaid["maa_status"] == "Rejected"],   _REJECTED_FILL),
+        ("Non-MAA — Dr Share Due",          unpaid[unpaid["tid"].isna()],                  _SUBTOTAL_FILL),
+        ("Total Outstanding (All Statuses)", unpaid,                                       TOTAL_FILL),
     ]
 
     for label, sub, fill in sections:
         if sub.empty:
             continue
-        ws.cell(row=start_row, column=1, value=label).font = TOTAL_FONT
-        ws.cell(row=start_row, column=2,
-                value=f"({len(sub)} {'entry' if len(sub) == 1 else 'entries'})"
-                ).font = Font(italic=True, name="Calibri")
-        for col_idx, field in _DOCTOR_NUMERIC_COLS.items():
-            if field in sub.columns:
-                val = sub[field].fillna(0).sum()
-                cell = ws.cell(row=start_row, column=col_idx, value=val)
-                cell.number_format = RUPEE_FMT
-                cell.font = TOTAL_FONT
-        for ci in range(1, n_cols + 1):
-            ws.cell(row=start_row, column=ci).fill = fill
+        _write_doctor_summary_row(ws, start_row, label, sub, fill, n_cols)
         start_row += 1
+
+
+def _write_doctor_payments_summary(ws, df: pd.DataFrame, n_cols: int | None = None) -> None:
+    """Append a payment-month-wise breakdown of entries already paid to the doctor."""
+    paid = df[df["doctor_paid"] == 1].copy()
+    if paid.empty:
+        return
+
+    if n_cols is None:
+        n_cols = len(DOCTOR_INTERNAL_COLS)
+
+    start_row = ws.max_row + 2
+
+    hdr = ws.cell(row=start_row, column=1,
+                  value="Doctor Payments Made — Paid to Date")
+    hdr.font = _SECTION_HDR_FONT
+    for ci in range(1, n_cols + 1):
+        ws.cell(row=start_row, column=ci).fill = TOTAL_FILL
+    start_row += 1
+
+    _UNSPECIFIED = "(Unspecified)"
+    paid["_pay_month"] = paid["doctor_payment_month"].fillna("").replace("", _UNSPECIFIED)
+    pay_month_keys = sorted(k for k in paid["_pay_month"].unique() if k != _UNSPECIFIED)
+    if _UNSPECIFIED in paid["_pay_month"].unique():
+        pay_month_keys.append(_UNSPECIFIED)
+
+    for pm in pay_month_keys:
+        sub = paid[paid["_pay_month"] == pm]
+        label = month_label(pm) if pm != _UNSPECIFIED else _UNSPECIFIED
+        _write_doctor_summary_row(ws, start_row, label, sub, _SUBTOTAL_FILL, n_cols)
+        start_row += 1
+
+    _write_doctor_summary_row(ws, start_row, "Total Paid", paid, TOTAL_FILL, n_cols)
+
+
+def _write_doctor_sheet(ws, df: pd.DataFrame, col_defs: list[tuple], sheet_title: str,
+                        header_fill, header_font, period_label: str) -> None:
+    """Write doctor-share headers + data into ws.
+
+    When df spans more than one month, entries are broken into per-month sections
+    (month band row → rows → subtotal row) instead of one flat table, with a
+    grand total row at the end. "No." numbering restarts at 1 within each section.
+    """
+    ws.title = sheet_title[:31]
+
+    headers = [c[0] for c in col_defs]
+    db_keys = [c[1] for c in col_defs]
+    fmts    = [c[2] for c in col_defs]
+    n_cols  = len(col_defs)
+
+    for ci, hdr in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=ci, value=hdr)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    ws.row_dimensions[1].height = 28
+    ws.freeze_panes = "B2"
+
+    multi_month = "month" in df.columns and df["month"].nunique() > 1
+    groups = df.groupby("month", sort=True) if multi_month else [(None, df)]
+
+    current_row = 2
+    grand_sums = {key: 0.0 for key in db_keys if key in SUMMABLE_COLS}
+
+    for month_ym, group in groups:
+        if multi_month:
+            label = month_label(month_ym)
+            for ci in range(1, n_cols + 1):
+                cell = ws.cell(row=current_row, column=ci, value=(label if ci == 1 else ""))
+                cell.fill = header_fill
+                cell.font = header_font
+            current_row += 1
+
+        for row_idx, (_, row) in enumerate(group.iterrows()):
+            for ci, (key, fmt) in enumerate(zip(db_keys, fmts), 1):
+                if key == "no":
+                    val = row_idx + 1
+                else:
+                    val = row.get(key)
+                    if not isinstance(val, str) and pd.isna(val):
+                        val = None
+                cell = ws.cell(row=current_row, column=ci, value=val)
+                if fmt:
+                    cell.number_format = fmt
+
+            maa_status = str(row.get("maa_status", "") or "")
+            if maa_status == "Claim Paid":
+                row_fill = GREEN_FILL
+            elif maa_status == "Rejected":
+                row_fill = _REJECTED_FILL
+            else:
+                row_fill = ROW_FILL_EVEN if row_idx % 2 == 0 else ROW_FILL_ODD
+            for ci in range(1, n_cols + 1):
+                ws.cell(row=current_row, column=ci).fill = row_fill
+            current_row += 1
+
+        for key in grand_sums:
+            if key in group.columns and pd.api.types.is_numeric_dtype(group[key]):
+                grand_sums[key] += group[key].sum()
+
+        if multi_month:
+            ws.cell(row=current_row, column=1, value=f"Subtotal — {label}").font = SUBTOTAL_FONT
+            for ci, (key, fmt) in enumerate(zip(db_keys, fmts), 1):
+                if key in SUMMABLE_COLS and key in group.columns and pd.api.types.is_numeric_dtype(group[key]):
+                    cell = ws.cell(row=current_row, column=ci, value=group[key].sum())
+                    cell.font = SUBTOTAL_FONT
+                    if fmt:
+                        cell.number_format = fmt
+            for ci in range(1, n_cols + 1):
+                ws.cell(row=current_row, column=ci).fill = _SUBTOTAL_FILL
+            current_row += 2  # subtotal row + blank spacer
+
+    total_row_label = "GRAND TOTAL — All Months" if multi_month else f"TOTAL — {period_label}"
+    ws.cell(row=current_row, column=1, value=total_row_label).font = TOTAL_FONT
+    for ci, (key, fmt) in enumerate(zip(db_keys, fmts), 1):
+        if key in grand_sums:
+            cell = ws.cell(row=current_row, column=ci, value=grand_sums[key])
+            cell.fill = TOTAL_FILL
+            cell.font = TOTAL_FONT
+            if fmt:
+                cell.number_format = fmt
+        else:
+            ws.cell(row=current_row, column=ci).fill = TOTAL_FILL
+
+    _auto_width(ws)
 
 
 def generate_doctor_internal(df: pd.DataFrame, month_label: str) -> bytes:
@@ -459,9 +595,10 @@ def generate_doctor_internal(df: pd.DataFrame, month_label: str) -> bytes:
     """
     wb = Workbook()
     ws = wb.active
-    _write_sheet(ws, _prepare_doctor_df(df), DOCTOR_INTERNAL_COLS, f"{month_label} (Internal)",
-                 color_by_maa_status=True, freeze_panes="B2")
-    _write_doctor_status_totals(ws, df, n_cols=len(DOCTOR_INTERNAL_COLS))
+    _write_doctor_sheet(ws, _prepare_doctor_df(df), DOCTOR_INTERNAL_COLS, f"{month_label} (Internal)",
+                        HEADER_FILL, HEADER_FONT, month_label)
+    _write_doctor_outstanding_summary(ws, df, n_cols=len(DOCTOR_INTERNAL_COLS))
+    _write_doctor_payments_summary(ws, df, n_cols=len(DOCTOR_INTERNAL_COLS))
     _auto_width(ws)
     ws.column_dimensions['A'].width = min(ws.column_dimensions['A'].width, 20)
     buf = io.BytesIO()
@@ -473,12 +610,12 @@ def generate_doctor_copy(df: pd.DataFrame, month_label: str) -> bytes:
     """Doctor-facing report: no payment tracking columns."""
     wb = Workbook()
     ws = wb.active
-    _write_sheet(
+    _write_doctor_sheet(
         ws, _prepare_doctor_df(df), DOCTOR_COPY_COLS, f"{month_label} (Dr Copy)",
-        color_by_maa_status=True, freeze_panes="B2",
-        header_fill=DOCTOR_COPY_HEADER_FILL, header_font=DOCTOR_COPY_HEADER_FONT,
+        DOCTOR_COPY_HEADER_FILL, DOCTOR_COPY_HEADER_FONT, month_label,
     )
-    _write_doctor_status_totals(ws, df, n_cols=len(DOCTOR_COPY_COLS))
+    _write_doctor_outstanding_summary(ws, df, n_cols=len(DOCTOR_COPY_COLS))
+    _write_doctor_payments_summary(ws, df, n_cols=len(DOCTOR_COPY_COLS))
     _auto_width(ws)
     ws.column_dimensions['A'].width = min(ws.column_dimensions['A'].width, 20)
     buf = io.BytesIO()
