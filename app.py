@@ -6,7 +6,7 @@ Run with: streamlit run app.py
 import streamlit as st
 
 import db
-from ui import admissions, dashboard, doctor_share
+from ui import admissions, dashboard, doctor_share, doctor_summary
 from ui import ingest as ingest_page
 from ui import reports as reports_page
 
@@ -25,7 +25,7 @@ def get_conn():
 
 conn = get_conn()
 
-_VALID_PAGES = {"Dashboard", "Ingest", "Admissions", "Reports", "Doctor Share"}
+_VALID_PAGES = {"Dashboard", "Ingest", "Admissions", "Reports", "Doctor Share", "Doctor Summary"}
 
 if "_page" not in st.session_state:
     _qp = st.query_params.get("page", "Dashboard")
@@ -54,13 +54,19 @@ with st.sidebar:
         type="primary" if st.session_state["_page"] == "Doctor Share" else "secondary",
     ):
         _nav("Doctor Share")
+    if st.button(
+        "📊 Doctor Summary", key="nav_dsum", width="stretch",
+        type="primary" if st.session_state["_page"] == "Doctor Summary" else "secondary",
+    ):
+        _nav("Doctor Summary")
 
 _PAGE_MAP = {
-    "Dashboard":    dashboard,
-    "Ingest":       ingest_page,
-    "Admissions":   admissions,
-    "Reports":      reports_page,
-    "Doctor Share": doctor_share,
+    "Dashboard":       dashboard,
+    "Ingest":          ingest_page,
+    "Admissions":      admissions,
+    "Reports":         reports_page,
+    "Doctor Share":    doctor_share,
+    "Doctor Summary":  doctor_summary,
 }
 
 _PAGE_MAP[st.session_state["_page"]].render(conn)

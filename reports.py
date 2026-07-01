@@ -8,6 +8,7 @@ from datetime import datetime
 
 import pandas as pd
 from openpyxl import Workbook
+from openpyxl.comments import Comment
 from openpyxl.styles import Alignment, Font, PatternFill as StylePatternFill
 from openpyxl.utils import get_column_letter
 
@@ -555,6 +556,16 @@ def _write_doctor_sheet(ws, df: pd.DataFrame, col_defs: list[tuple], sheet_title
                 row_fill = ROW_FILL_EVEN if row_idx % 2 == 0 else ROW_FILL_ODD
             for ci in range(1, n_cols + 1):
                 ws.cell(row=current_row, column=ci).fill = row_fill
+
+            if row.get("shares_reconcile") is False and "hospital_share" in db_keys:
+                hosp_ci = db_keys.index("hospital_share") + 1
+                hosp_cell = ws.cell(row=current_row, column=hosp_ci)
+                hosp_cell.font = Font(bold=True, color="C00000", name="Calibri")
+                hosp_cell.comment = Comment(
+                    "Floored at ₹0 — expenses + doctor share exceed the MAA payment on this entry.",
+                    "MAA App",
+                )
+
             current_row += 1
 
         for key in grand_sums:

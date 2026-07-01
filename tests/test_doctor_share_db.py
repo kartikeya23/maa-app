@@ -115,6 +115,35 @@ def test_get_doctor_expenses_non_maa_no_flat(mem_db):
     assert pd.isna(row["hospital_share"])
 
 
+def test_get_doctor_expenses_flags_unreconciled_flat_override(mem_db_with_claims):
+    # Flat override (30000) exceeds maa_payment - total_ex (24300 - 1500 = 22800),
+    # so hospital_share floors at 0 and the row no longer reconciles with maa_payment.
+    conn = mem_db_with_claims
+    conn.execute(
+        """INSERT INTO doctor_expenses
+               (tid, patient_name, admission_date, month, hosp_ex, pharma_ex, dialysis_ex, doctor_flat)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        ("TID001", "Ravi Kumar", "2025-06-15", "2025-06", 500.0, 1000.0, 0.0, 30000.0),
+    )
+    conn.commit()
+    row = db.get_doctor_expenses(conn, "2025-06").iloc[0]
+    assert row["hospital_share"] == 0.0
+    assert row["shares_reconcile"] == False
+
+
+def test_get_doctor_expenses_reconciles_by_default(mem_db_with_claims):
+    conn = mem_db_with_claims
+    conn.execute(
+        """INSERT INTO doctor_expenses
+               (tid, patient_name, admission_date, month, hosp_ex, pharma_ex, dialysis_ex, maa_status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        ("TID001", "Ravi Kumar", "2025-06-15", "2025-06", 500.0, 1000.0, 0.0, "Claim Paid"),
+    )
+    conn.commit()
+    row = db.get_doctor_expenses(conn, "2025-06").iloc[0]
+    assert row["shares_reconcile"] == True
+
+
 def test_search_claims_for_matching_exact_month(mem_db_with_claims):
     results = db.search_claims_for_matching(mem_db_with_claims, "ravi", "2025-06", expand=False)
     assert len(results) == 1
@@ -126,6 +155,19 @@ def test_search_claims_for_matching_expand(mem_db_with_claims):
     results = db.search_claims_for_matching(mem_db_with_claims, "ravi", "2025-07", expand=True)
     assert len(results) == 1
     assert results[0]["tid"] == "TID001"
+
+
+def test_search_claims_fuzzy_fallback_on_typo(mem_db_with_claims):
+    # "Ravu Kumar" (typo) has no exact substring match against "Ravi Kumar" but is
+    # close enough for difflib to catch — handles hand-typed bill names vs. portal spelling.
+    results = db.search_claims_for_matching(mem_db_with_claims, "Ravu Kumar", "2025-06", expand=False)
+    assert len(results) == 1
+    assert results[0]["tid"] == "TID001"
+
+
+def test_search_claims_no_match_returns_empty(mem_db_with_claims):
+    results = db.search_claims_for_matching(mem_db_with_claims, "Zzyzx Nobody", "2025-06", expand=False)
+    assert results == []
 
 
 def test_search_claims_excludes_already_matched(mem_db_with_claims):
@@ -178,6 +220,48 @@ def test_update_doctor_expense(mem_db):
         "SELECT hosp_ex, comments FROM doctor_expenses WHERE id=?", (row_id,)
     ).fetchone()
     assert row == (200.0, "Updated")
+
+
+def test_update_doctor_expense_logs_changed_fields(mem_db):
+    conn = mem_db
+    conn.execute(
+        "INSERT INTO doctor_expenses (tid, patient_name, admission_date, month, hosp_ex) VALUES (?, ?, ?, ?, ?)",
+        ("T001", "Patient A", "2025-06-01", "2025-06", 100.0),
+    )
+    conn.commit()
+    row_id = conn.execute("SELECT id FROM doctor_expenses").fetchone()[0]
+    db.update_doctor_expense(conn, row_id, {"hosp_ex": 200.0, "comments": "Updated"})
+    log = db.get_doctor_expense_log(conn, row_id)
+    assert set(log["field"]) == {"hosp_ex", "comments"}
+    hosp_row = log[log["field"] == "hosp_ex"].iloc[0]
+    assert hosp_row["old_value"] == "100.0"
+    assert hosp_row["new_value"] == "200.0"
+
+
+def test_update_doctor_expense_does_not_log_unchanged_fields(mem_db):
+    conn = mem_db
+    conn.execute(
+        "INSERT INTO doctor_expenses (tid, patient_name, admission_date, month, hosp_ex) VALUES (?, ?, ?, ?, ?)",
+        ("T001", "Patient A", "2025-06-01", "2025-06", 100.0),
+    )
+    conn.commit()
+    row_id = conn.execute("SELECT id FROM doctor_expenses").fetchone()[0]
+    # Value is unchanged (int 100 vs the stored float 100.0 must compare equal, not log).
+    db.update_doctor_expense(conn, row_id, {"hosp_ex": 100})
+    log = db.get_doctor_expense_log(conn, row_id)
+    assert log.empty
+
+
+def test_get_doctor_expense_log_empty_for_untouched_entry(mem_db):
+    conn = mem_db
+    conn.execute(
+        "INSERT INTO doctor_expenses (tid, patient_name, admission_date, month) VALUES (?, ?, ?, ?)",
+        ("T001", "Patient A", "2025-06-01", "2025-06"),
+    )
+    conn.commit()
+    row_id = conn.execute("SELECT id FROM doctor_expenses").fetchone()[0]
+    log = db.get_doctor_expense_log(conn, row_id)
+    assert log.empty
 
 
 def test_delete_doctor_expense(mem_db):
@@ -327,6 +411,101 @@ def test_save_doctor_expense_defaults_to_kavesh(mem_db):
         "SELECT doctor_name FROM doctor_expenses WHERE id = ?", (row_id,)
     ).fetchone()[0]
     assert stored == "Dr. Kavesh"
+
+
+def test_compute_doctor_share_clamps_shortfall_to_zero_when_not_rejected():
+    # pct*(maa-ex) would be negative; not rejected, so both shares floor at 0.
+    doctor_share, hospital_share = db.compute_doctor_share(
+        maa_payment=1000.0, total_ex=5000.0, doctor_pct=0.4, doctor_flat=None, is_rejected=False,
+    )
+    assert doctor_share == 0.0
+    assert hospital_share == 0.0
+
+
+def test_compute_doctor_share_allows_negative_when_rejected():
+    # A Rejected claim doesn't waive the doctor's share, so the shortfall stays negative
+    # instead of being floored at 0 — it's still owed, just not covered by MAA payment.
+    doctor_share, hospital_share = db.compute_doctor_share(
+        maa_payment=1000.0, total_ex=5000.0, doctor_pct=0.4, doctor_flat=None, is_rejected=True,
+    )
+    assert doctor_share == pytest.approx(0.4 * (1000.0 - 5000.0))
+    assert hospital_share == pytest.approx(1000.0 - doctor_share - 5000.0)
+
+
+def test_compute_doctor_share_no_maa_link_no_flat_returns_none():
+    doctor_share, hospital_share = db.compute_doctor_share(
+        maa_payment=None, total_ex=0.0, doctor_pct=0.4, doctor_flat=None, is_rejected=False,
+    )
+    assert doctor_share is None
+    assert hospital_share is None
+
+
+def test_compute_doctor_share_flat_override_without_maa_link():
+    doctor_share, hospital_share = db.compute_doctor_share(
+        maa_payment=None, total_ex=0.0, doctor_pct=0.4, doctor_flat=3000.0, is_rejected=False,
+    )
+    assert doctor_share == 3000.0
+    assert hospital_share is None
+
+
+def test_compute_doctor_share_linked_but_unpaid_hospital_share_is_none():
+    # tid linked but MAA hasn't paid anything yet (maa_payment == 0): doctor_share is
+    # still derived from the flat/pct, but hospital_share is unknowable until paid.
+    doctor_share, hospital_share = db.compute_doctor_share(
+        maa_payment=0.0, total_ex=0.0, doctor_pct=0.4, doctor_flat=2000.0, is_rejected=False,
+    )
+    assert doctor_share == 2000.0
+    assert hospital_share is None
+
+
+def test_compute_doctor_share_zero_pct_is_not_treated_as_default():
+    # Regression guard: doctor_pct=0.0 is a legitimate value (doctor takes no percentage
+    # share) and must not be coerced to the 0.4 schema default anywhere in the pipeline.
+    doctor_share, hospital_share = db.compute_doctor_share(
+        maa_payment=24300.0, total_ex=1500.0, doctor_pct=0.0, doctor_flat=None, is_rejected=False,
+    )
+    assert doctor_share == 0.0
+    assert hospital_share == pytest.approx(24300.0 - 1500.0)
+
+
+def test_get_doctor_lifetime_totals_no_entries(mem_db):
+    totals = db.get_doctor_lifetime_totals(mem_db, "Dr. Kavesh")
+    assert totals["entries"] == 0
+    assert totals["total_doctor_share"] == 0.0
+
+
+def test_get_doctor_lifetime_totals_spans_all_months(mem_db_with_claims):
+    conn = mem_db_with_claims
+    conn.executemany(
+        """INSERT INTO doctor_expenses
+               (tid, patient_name, admission_date, month, hosp_ex, doctor_flat, doctor_paid, doctor_name)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        [
+            ("TID001", "Ravi Kumar",  "2025-06-15", "2025-06", 0.0, 5000.0, 1, "Dr. Kavesh"),
+            (None,     "Cash Patient", "2025-07-01", "2025-07", 0.0, 3000.0, 0, "Dr. Kavesh"),
+        ],
+    )
+    conn.commit()
+    totals = db.get_doctor_lifetime_totals(conn, "Dr. Kavesh")
+    assert totals["entries"] == 2
+    assert totals["paid_entries"] == 1
+    assert totals["unpaid_entries"] == 1
+    assert totals["total_doctor_share"] == pytest.approx(8000.0)
+    assert totals["outstanding_doctor_share"] == pytest.approx(3000.0)
+
+
+def test_get_doctor_lifetime_totals_scoped_to_doctor(mem_db):
+    mem_db.executemany(
+        "INSERT INTO doctor_expenses (patient_name, admission_date, month, doctor_flat, doctor_name) VALUES (?, ?, ?, ?, ?)",
+        [
+            ("Patient A", "2025-06-01", "2025-06", 1000.0, "Dr. Kavesh"),
+            ("Patient B", "2025-07-01", "2025-07", 2000.0, "Dr. X"),
+        ],
+    )
+    mem_db.commit()
+    kavesh = db.get_doctor_lifetime_totals(mem_db, "Dr. Kavesh")
+    assert kavesh["entries"] == 1
+    assert kavesh["total_doctor_share"] == pytest.approx(1000.0)
 
 
 def test_update_doctor_expense_doctor_name(mem_db):

@@ -66,9 +66,10 @@ def test_generate_doctor_copy_sheet_name(sample_entries):
 def test_report_row_count(sample_entries):
     wb = load_workbook(io.BytesIO(reports.generate_doctor_internal(sample_entries, "June 2025")))
     ws = wb.active
-    # header row + 2 data rows + 1 total row = 4
-    # + 1 blank spacer + 1 outstanding summary header + 1 "Total Unpaid" subtotal row = 7
-    assert ws.max_row == 7
+    # header + 2 data rows + total row = rows 1-4
+    # outstanding summary (entry 2, unpaid/Non-MAA): blank + header + "Non-MAA" row + "Total Outstanding" row = rows 6-8
+    # payments summary (entry 1, paid in 2025-06): blank + header + "June 2025" row + "Total Paid" row = rows 10-12
+    assert ws.max_row == 12
 
 
 def test_generate_doctor_copy_header_is_teal(sample_entries):
@@ -77,6 +78,20 @@ def test_generate_doctor_copy_header_is_teal(sample_entries):
     # openpyxl returns ARGB; last 6 chars are the hex colour
     header_fill = ws.cell(1, 1).fill.fgColor.rgb[-6:]
     assert header_fill == "00695C", f"Expected teal 00695C, got {header_fill}"
+
+
+def test_unreconciled_hospital_share_is_flagged(sample_entries):
+    df = sample_entries.copy()
+    df.loc[0, "shares_reconcile"] = False
+    df.loc[1, "shares_reconcile"] = True
+    wb = load_workbook(io.BytesIO(reports.generate_doctor_internal(df, "June 2025")))
+    ws = wb.active
+    hosp_col = 9  # Hospital Share column in DOCTOR_INTERNAL_COLS
+    flagged_cell = ws.cell(2, hosp_col)
+    ok_cell = ws.cell(3, hosp_col)
+    assert flagged_cell.font.color.rgb[-6:] == "C00000"
+    assert flagged_cell.comment is not None
+    assert ok_cell.comment is None
 
 
 def test_generate_doctor_internal_header_is_navy(sample_entries):

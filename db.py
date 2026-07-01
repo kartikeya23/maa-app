@@ -3,6 +3,7 @@ Database layer for MAA Payment Record Management System.
 Schema, upsert, and query functions backed by SQLite.
 """
 
+import difflib
 import hashlib
 import json
 import sqlite3
@@ -45,6 +46,18 @@ CREATE TABLE IF NOT EXISTS doctor_expenses (
     created_at           TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at           TEXT DEFAULT CURRENT_TIMESTAMP
 );
+"""
+
+DOCTOR_EXPENSES_LOG_DDL = """
+CREATE TABLE IF NOT EXISTS doctor_expenses_log (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    expense_id  INTEGER NOT NULL,
+    field       TEXT NOT NULL,
+    old_value   TEXT,
+    new_value   TEXT,
+    changed_at  TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_doctor_expenses_log_expense_id ON doctor_expenses_log (expense_id);
 """
 
 DDL = """
@@ -143,6 +156,7 @@ def init_db(path: str | Path = DB_PATH) -> sqlite3.Connection:
     conn.executescript(DDL)
     conn.executescript(HASH_DDL)
     conn.executescript(DOCTOR_EXPENSES_DDL)
+    conn.executescript(DOCTOR_EXPENSES_LOG_DDL)
     try:
         conn.execute(
             "ALTER TABLE doctor_expenses ADD COLUMN doctor_name TEXT NOT NULL DEFAULT 'Dr. Kavesh'"
@@ -575,24 +589,112 @@ def get_doctor_expenses(conn: sqlite3.Connection, months: str | list[str], docto
     def _is_rejected(r):
         return isinstance(r.get("maa_status"), str) and "rejected" in r["maa_status"].lower()
 
-    def _doctor_share(r):
-        if pd.notna(r["doctor_flat"]):
-            return r["doctor_flat"]
-        if not pd.notna(r["maa_payment"]):
-            return None
-        val = r["doctor_pct"] * (r["maa_payment"] - r["total_ex"])
-        return val if _is_rejected(r) else max(0.0, val)
+    def _shares(r):
+        return compute_doctor_share(
+            r["maa_payment"], r["total_ex"], r["doctor_pct"], r["doctor_flat"], _is_rejected(r),
+        )
 
-    def _hospital_share(r):
-        if not (pd.notna(r["tid"]) and pd.notna(r["maa_payment"])
-                and r["maa_payment"] > 0 and pd.notna(r["doctor_share"])):
-            return None
-        val = r["maa_payment"] - r["doctor_share"] - r["total_ex"]
-        return val if _is_rejected(r) else max(0.0, val)
+    shares = df.apply(_shares, axis=1)
+    df["doctor_share"]   = shares.apply(lambda t: t[0])
+    df["hospital_share"] = shares.apply(lambda t: t[1])
 
-    df["doctor_share"] = df.apply(_doctor_share, axis=1)
-    df["hospital_share"] = df.apply(_hospital_share, axis=1)
+    # Force numeric dtype: when every row in a column is None (e.g. an all-non-MAA
+    # month has no maa_payment/hospital_share at all), pandas leaves it as dtype
+    # object instead of float64, which trips a FutureWarning on later .fillna(0) calls.
+    for _col in ("maa_payment", "doctor_share", "hospital_share"):
+        df[_col] = pd.to_numeric(df[_col], errors="coerce")
+
+    def _reconciles(r):
+        # When a flat/percentage doctor share is clamped (see compute_doctor_share),
+        # total_ex + doctor_share + hospital_share can end up short of maa_payment —
+        # the hospital silently absorbs the difference. Flag that so it isn't mistaken
+        # for a bookkeeping error later.
+        if not (pd.notna(r["maa_payment"]) and pd.notna(r["doctor_share"]) and pd.notna(r["hospital_share"])):
+            return True
+        gap = r["maa_payment"] - r["total_ex"] - r["doctor_share"] - r["hospital_share"]
+        return abs(gap) < 0.01
+
+    df["shares_reconcile"] = df.apply(_reconciles, axis=1)
     return df
+
+
+def get_doctor_all_entries(conn: sqlite3.Connection, doctor_name: str) -> pd.DataFrame:
+    """All doctor_expenses entries (every month on record) for one doctor, with
+    computed maa_payment/doctor_share/hospital_share/shares_reconcile columns.
+
+    Used for the lifetime totals and the Doctor Summary charts, where the view
+    isn't scoped to whatever months happen to be selected on the Doctor Share page.
+    """
+    months = get_doctor_expense_months(conn, doctor_name)
+    if not months:
+        return pd.DataFrame()
+    return get_doctor_expenses(conn, months, doctor_name)
+
+
+def get_doctor_lifetime_totals(conn: sqlite3.Connection, doctor_name: str) -> dict:
+    """Aggregates doctor_expenses totals across every month on record for one doctor.
+
+    The per-month view in get_doctor_expenses is scoped to whatever months are
+    selected in the UI; this gives the running lifetime numbers needed for a
+    settlement conversation with the doctor (e.g. "how much do we owe in total").
+    """
+    empty = {
+        "entries": 0, "paid_entries": 0, "unpaid_entries": 0,
+        "total_maa_payment": 0.0, "total_doctor_share": 0.0,
+        "total_hospital_share": 0.0, "total_expenses": 0.0,
+        "outstanding_doctor_share": 0.0,
+    }
+    df = get_doctor_all_entries(conn, doctor_name)
+    if df.empty:
+        return empty
+
+    unpaid = df[df["doctor_paid"] == 0]
+    return {
+        "entries":                  len(df),
+        "paid_entries":             int((df["doctor_paid"] == 1).sum()),
+        "unpaid_entries":           len(unpaid),
+        "total_maa_payment":       float(df["maa_payment"].fillna(0).sum()),
+        "total_doctor_share":      float(df["doctor_share"].fillna(0).sum()),
+        "total_hospital_share":    float(df["hospital_share"].fillna(0).sum()),
+        "total_expenses":          float(df["total_ex"].fillna(0).sum()),
+        "outstanding_doctor_share": float(unpaid["doctor_share"].fillna(0).sum()),
+    }
+
+
+def compute_doctor_share(
+    maa_payment: float | None,
+    total_ex: float,
+    doctor_pct: float,
+    doctor_flat: float | None,
+    is_rejected: bool,
+) -> tuple[float | None, float | None]:
+    """Computes (doctor_share, hospital_share) for one doctor_expenses entry.
+
+    Shared by get_doctor_expenses (persisted table/report values) and the
+    Streamlit add/edit forms (live preview), so the number a user sees while
+    editing always matches what ends up stored and reported.
+
+    A claim being Rejected doesn't waive the doctor's share — it's still owed —
+    so shares are left unclamped (can go negative) only when is_rejected is
+    True; otherwise a shortfall is floored at 0 rather than shown as negative.
+    """
+    has_maa = pd.notna(maa_payment)
+    has_flat = pd.notna(doctor_flat)
+
+    if has_flat:
+        doctor_share = float(doctor_flat)
+    elif not has_maa:
+        return None, None
+    else:
+        raw = doctor_pct * (maa_payment - total_ex)
+        doctor_share = raw if is_rejected else max(0.0, raw)
+
+    if not has_maa or maa_payment <= 0:
+        return doctor_share, None
+
+    raw_hosp = maa_payment - doctor_share - total_ex
+    hospital_share = raw_hosp if is_rejected else max(0.0, raw_hosp)
+    return doctor_share, hospital_share
 
 
 def search_claims_for_matching(
@@ -602,9 +704,13 @@ def search_claims_for_matching(
     expand: bool = False,
 ) -> list[dict]:
     """
-    Fuzzy-search MAA claims by patient name within the given month.
+    Search MAA claims by patient name within the given month.
     If expand=True, also includes the previous and next months.
     Excludes TIDs already present in doctor_expenses.
+
+    Tries an exact case-insensitive substring match first; if that finds nothing,
+    falls back to fuzzy name matching (handles typos between a hand-typed hospital
+    bill name and the MAA portal's spelling of the same patient).
     """
     months = [month]
     if expand:
@@ -624,15 +730,24 @@ def search_claims_for_matching(
                 AS maa_paid,
             GROUP_CONCAT(DISTINCT status) AS status
         FROM claims
-        WHERE LOWER(patient_name) LIKE LOWER(?)
-          AND strftime('%Y-%m', date_of_admission) IN ({placeholders})
+        WHERE strftime('%Y-%m', date_of_admission) IN ({placeholders})
           AND tid NOT IN (SELECT tid FROM doctor_expenses WHERE tid IS NOT NULL)
         GROUP BY tid
         ORDER BY date_of_admission DESC
     """
-    rows = conn.execute(sql, [f"%{name}%"] + months).fetchall()
+    rows = conn.execute(sql, months).fetchall()
     cols = ["tid", "patient_name", "date_of_admission", "date_of_discharge", "maa_paid", "status"]
-    return [dict(zip(cols, r)) for r in rows]
+    candidates = [dict(zip(cols, r)) for r in rows]
+
+    needle = name.lower()
+    exact = [c for c in candidates if needle in (c["patient_name"] or "").lower()]
+    if exact:
+        return exact
+
+    close_names = difflib.get_close_matches(
+        needle, [(c["patient_name"] or "").lower() for c in candidates], n=5, cutoff=0.6,
+    )
+    return [c for c in candidates if (c["patient_name"] or "").lower() in close_names]
 
 
 def infer_maa_status(conn: sqlite3.Connection, tid: str) -> str | None:
@@ -730,12 +845,39 @@ def update_doctor_expense(conn: sqlite3.Connection, row_id: int, fields: dict) -
     updates = {k: v for k, v in fields.items() if k in allowed}
     if not updates:
         return
+
+    old_row = conn.execute(
+        f"SELECT {', '.join(updates.keys())} FROM doctor_expenses WHERE id = ?", (row_id,)
+    ).fetchone()
+    if old_row is not None:
+        for field, old_val in zip(updates.keys(), old_row):
+            new_val = updates[field]
+            if old_val != new_val:
+                conn.execute(
+                    """INSERT INTO doctor_expenses_log (expense_id, field, old_value, new_value)
+                       VALUES (?, ?, ?, ?)""",
+                    (row_id, field,
+                     None if old_val is None else str(old_val),
+                     None if new_val is None else str(new_val)),
+                )
+
     set_clause = ", ".join(f"{k} = ?" for k in updates)
     conn.execute(
         f"UPDATE doctor_expenses SET {set_clause}, updated_at = datetime('now') WHERE id = ?",
         list(updates.values()) + [row_id],
     )
     conn.commit()
+
+
+def get_doctor_expense_log(conn: sqlite3.Connection, expense_id: int) -> pd.DataFrame:
+    """Returns the field-level change history for one doctor_expenses row, newest first."""
+    return pd.read_sql_query(
+        """SELECT field, old_value, new_value, changed_at
+           FROM doctor_expenses_log
+           WHERE expense_id = ?
+           ORDER BY changed_at DESC, id DESC""",
+        conn, params=[expense_id],
+    )
 
 
 def delete_doctor_expense(conn: sqlite3.Connection, row_id: int) -> None:
