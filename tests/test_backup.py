@@ -76,6 +76,27 @@ def test_backup_bad_dir_returns_error(mem_db, tmp_path):
     assert err  # non-empty message
 
 
+def test_prune_failure_keeps_new_backup(mem_db_with_claims, tmp_path, monkeypatch):
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir()
+    for d in range(1, 16):
+        (backup_dir / f"maa-2026-06-{d:02d}.db").write_bytes(b"old")
+
+    from pathlib import Path
+    real_unlink = Path.unlink
+
+    def failing_unlink(self, missing_ok=False):
+        if self.name.startswith("maa-2026-06-"):
+            raise PermissionError("locked")
+        return real_unlink(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", failing_unlink)
+    path, err = db.backup_db(mem_db_with_claims, backup_dir)
+
+    assert path is not None and path.exists()  # valid backup survives
+    assert err and "prun" in err.lower()
+
+
 def test_backup_failure_cleans_partial_file(tmp_path):
     class BoomConn:
         def backup(self, dest):

@@ -937,15 +937,20 @@ def backup_db(
                 conn.backup(dest)
         finally:
             dest.close()
-
-        # Dated names sort lexically == chronologically.
-        for old in sorted(backup_dir.glob("maa-*.db"))[:-keep]:
-            old.unlink()
-        return target, None
     except Exception as e:
         # Remove a partial target so tomorrow's run doesn't mistake a
         # corrupt file for a valid backup.
         if target is not None:
             target.unlink(missing_ok=True)
         return None, str(e)
+
+    # Pruning failure must never destroy the valid backup just created —
+    # report it alongside the successful backup path instead.
+    try:
+        # Dated names sort lexically == chronologically.
+        for old in sorted(backup_dir.glob("maa-*.db"))[:-keep]:
+            old.unlink()
+    except Exception as e:
+        return target, f"Backup OK; pruning failed: {e}"
+    return target, None
 
