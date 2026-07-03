@@ -13,6 +13,7 @@ from pathlib import Path
 import pandas as pd
 
 DB_PATH = Path(__file__).parent / "maa.db"
+BACKUP_DIR = Path(__file__).parent / "backups"
 
 # ── Schema ────────────────────────────────────────────────────────────────────
 
@@ -907,4 +908,44 @@ def unmark_doctor_paid(conn: sqlite3.Connection, ids: list[int]) -> None:
         ids,
     )
     conn.commit()
+
+
+# ── Backups ───────────────────────────────────────────────────────────────────
+
+def backup_db(
+    conn: sqlite3.Connection,
+    backup_dir: Path = BACKUP_DIR,
+    keep: int = 14,
+) -> tuple[Path | None, str | None]:
+    """Snapshot the live DB to backup_dir/maa-YYYY-MM-DD.db.
+
+    No-op if today's backup already exists. After a successful backup,
+    keep only the newest `keep` maa-*.db files. Returns (path, error);
+    never raises — a failed backup must not block app startup.
+    """
+    target = None
+    try:
+        backup_dir = Path(backup_dir)
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        target = backup_dir / f"maa-{datetime.now().strftime('%Y-%m-%d')}.db"
+        if target.exists():
+            return target, None
+
+        dest = sqlite3.connect(target)
+        try:
+            with dest:
+                conn.backup(dest)
+        finally:
+            dest.close()
+
+        # Dated names sort lexically == chronologically.
+        for old in sorted(backup_dir.glob("maa-*.db"))[:-keep]:
+            old.unlink()
+        return target, None
+    except Exception as e:
+        # Remove a partial target so tomorrow's run doesn't mistake a
+        # corrupt file for a valid backup.
+        if target is not None:
+            target.unlink(missing_ok=True)
+        return None, str(e)
 
