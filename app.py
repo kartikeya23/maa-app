@@ -23,7 +23,14 @@ def get_conn():
     return db.init_db()
 
 
+@st.cache_resource
+def run_daily_backup() -> tuple:
+    """Once per server process; date-named file makes it daily."""
+    return db.backup_db(get_conn())
+
+
 conn = get_conn()
+backup_path, backup_error = run_daily_backup()
 
 _VALID_PAGES = {"Dashboard", "Ingest", "Admissions", "Reports", "Doctor Share", "Doctor Summary"}
 
@@ -70,3 +77,9 @@ _PAGE_MAP = {
 }
 
 _PAGE_MAP[st.session_state["_page"]].render(conn)
+
+with st.sidebar:
+    if backup_error:
+        st.caption(f"⚠️ Backup failed: {backup_error}")
+    elif backup_path:
+        st.caption(f"Last backup: {backup_path.stem.removeprefix('maa-')}")
