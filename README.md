@@ -9,6 +9,7 @@ A web application for tracking hospital admission claims under the MAA (Mother's
 - **Admissions** — Filterable, paginated table (name search + date/policy/status/speciality) with per-claim package details and Excel export
 - **Reports** — Multiple report types (Admission Summary, Monthly, Financial Year, Raw Export) as downloadable `.xlsx` files
 - **Doctor Share** — Per-doctor expense tracking with MAA claim linking, auto-status detection, monthly/range filters, bulk mark-paid, and internal/doctor-copy Excel exports
+- **Automatic backups** — Daily rotating snapshot of `maa.db` to `backups/` on app launch (newest 14 kept)
 
 ## Architecture
 
@@ -21,6 +22,7 @@ fetch.py              MAA portal scraper — browser session reuse + Playwright 
 reports.py            In-memory .xlsx generation via openpyxl
 doctors.toml          Local config: doctor names and default fee percentages (gitignored)
 doctors.toml.example  Template for doctors.toml
+backups/              Daily rotating DB snapshots (maa-YYYY-MM-DD.db, gitignored)
 ui/
   dashboard.py        Dashboard page
   ingest.py           Ingest page
@@ -49,6 +51,22 @@ cp doctors.toml.example doctors.toml
 ```bash
 streamlit run app.py
 ```
+
+## Backups
+
+On the first launch of each day, the app snapshots `maa.db` to
+`backups/maa-YYYY-MM-DD.db` using SQLite's online backup API and keeps the
+newest 14 copies. The sidebar footer shows the last backup date.
+
+**To restore:** quit the app, then
+
+```bash
+cp backups/maa-YYYY-MM-DD.db maa.db
+```
+
+and relaunch. Claims can always be re-fetched from the portal, but doctor
+share entries exist only in this database — restore from the most recent
+good backup.
 
 ## Data Ingestion
 

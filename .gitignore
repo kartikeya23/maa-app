@@ -16,6 +16,7 @@ __pycache__/
 *.db
 maa.db
 *.sqlite
+backups/
 
 # Logs and exports
 *.log
