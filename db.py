@@ -922,6 +922,8 @@ def backup_db(
     No-op if today's backup already exists. After a successful backup,
     keep only the newest `keep` maa-*.db files. Returns (path, error);
     never raises — a failed backup must not block app startup.
+    On prune failure both are set: the backup at `path` is valid; only
+    old-file cleanup failed.
     """
     target = None
     try:

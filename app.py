@@ -3,6 +3,8 @@ MAA Payment Record Management System — Streamlit Web UI.
 Run with: streamlit run app.py
 """
 
+from pathlib import Path
+
 import streamlit as st
 
 import db
@@ -24,7 +26,7 @@ def get_conn():
 
 
 @st.cache_resource
-def run_daily_backup() -> tuple:
+def run_daily_backup() -> tuple[Path | None, str | None]:
     """Once per server process; date-named file makes it daily."""
     return db.backup_db(get_conn())
 
@@ -79,7 +81,9 @@ _PAGE_MAP = {
 _PAGE_MAP[st.session_state["_page"]].render(conn)
 
 with st.sidebar:
-    if backup_error:
-        st.caption(f"⚠️ Backup failed: {backup_error}")
-    elif backup_path:
+    if backup_path:
         st.caption(f"Last backup: {backup_path.stem.removeprefix('maa-')}")
+        if backup_error:
+            st.caption(f"⚠️ {backup_error}")
+    elif backup_error:
+        st.caption(f"⚠️ Backup failed: {backup_error}")
