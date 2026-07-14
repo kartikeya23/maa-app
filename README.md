@@ -10,11 +10,13 @@ A web application for tracking hospital admission claims under the MAA (Mother's
 - **Reports** — Multiple report types (Admission Summary, Monthly, Financial Year, Raw Export) as downloadable `.xlsx` files
 - **Doctor Share** — Per-doctor expense tracking with MAA claim linking, auto-status detection, monthly/range filters, bulk mark-paid, and internal/doctor-copy Excel exports
 - **Automatic backups** — Daily rotating snapshot of `maa.db` to `backups/` on app launch (newest 14 kept)
+- **Logging** — App and CLI activity logged to `logs/maa.log` (daily rotation, 14 days kept)
 
 ## Architecture
 
 ```
 app.py                Entry point: page config, DB connection, sidebar nav, routing
+log.py                Logging setup — logs/maa.log, daily rotation, optional console
 utils.py              Shared helpers (fmt_inr currency formatter)
 db.py                 All database access (SQLite). Schema: claims + doctor_expenses
 ingest.py             CSV parsing and ingestion (CLI and library)
@@ -67,6 +69,11 @@ cp backups/maa-YYYY-MM-DD.db maa.db
 and relaunch. Claims can always be re-fetched from the portal, but doctor
 share entries exist only in this database — restore from the most recent
 good backup.
+
+## Logs
+
+App and CLI activity is logged to `logs/maa.log` (daily rotation, 14 days kept).
+Set `MAA_DEBUG=1` or pass `--verbose` to the CLI tools for debug-level detail.
 
 ## Data Ingestion
 

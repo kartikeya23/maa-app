@@ -17,9 +17,15 @@ Doctor share parameterisation:
 """
 
 import csv
+import logging
 import sqlite3
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+import log  # noqa: E402
+
+logger = logging.getLogger("maa.import_doctor_data")
 
 DB_PATH = Path(__file__).parent.parent / "maa.db"
 
@@ -153,7 +159,7 @@ def run(csv_path: str, dry_run: bool = False) -> None:
 
             tag = "[DRY-RUN] " if dry_run else ""
             flat_info = f"flat=₹{doctor_flat:,.2f}" if doctor_flat else f"pct={doctor_pct:.0%}"
-            print(
+            logger.info(
                 f"  {tag}{month} | {name:<30} | MAA={maa_payment:>9,.2f}"
                 f" | {flat_info:<18} | paid={doctor_paid} | {maa_status or 'non-MAA'}"
             )
@@ -163,15 +169,12 @@ def run(csv_path: str, dry_run: bool = False) -> None:
         conn.commit()
     conn.close()
 
-    print()
+    logger.info("")
     if errors:
-        print("Warnings / errors:")
-        for e in errors:
-            print(e)
-        print()
+        logger.warning("Warnings / errors:\n%s\n", "\n".join(errors))
 
     action = "Would insert" if dry_run else "Inserted"
-    print(f"{action} {inserted} rows, skipped {len(errors) + skipped - len(errors)} blank rows.")
+    logger.info("%s %d rows, skipped %d blank rows.", action, inserted, skipped)
 
 
 if __name__ == "__main__":
@@ -180,10 +183,12 @@ if __name__ == "__main__":
         print(__doc__)
         sys.exit(0)
 
+    log.setup_logging(console=True, verbose="--verbose" in args)
+
     dry = "--dry-run" in args
     paths = [a for a in args if not a.startswith("--")]
     if not paths:
-        print("Error: provide a CSV path.  Use --dry-run to preview without writing.")
+        logger.error("Error: provide a CSV path.  Use --dry-run to preview without writing.")
         sys.exit(1)
 
     run(paths[0], dry_run=dry)

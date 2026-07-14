@@ -17,11 +17,15 @@ import argparse
 import csv
 import glob
 import io
+import logging
 import sys
 from datetime import datetime
 from pathlib import Path
 
 import db
+import log
+
+logger = logging.getLogger("maa.ingest")
 
 # CSVs live in the parent directory (one level above maa_app/)
 CSV_DIR = Path(__file__).parent.parent
@@ -188,19 +192,23 @@ def ingest(csv_files: list[str], dry_run: bool = False):
         new, updated, unchanged = db.upsert_claims(conn, rows, dry_run=dry_run)
         name = Path(csv_path).name
         if dry_run:
-            print(f"  [DRY RUN] {name}: {new} new, {updated} updated, {unchanged} unchanged (estimated)")
+            logger.info("  [DRY RUN] %s: %s new, %s updated, %s unchanged (estimated)",
+                        name, new, updated, unchanged)
         else:
-            print(f"  Ingested {name}: {len(rows)} rows — {new} new, {updated} updated, {unchanged} unchanged")
+            logger.info("  Ingested %s: %s rows — %s new, %s updated, %s unchanged",
+                        name, len(rows), new, updated, unchanged)
         total_new += new
         total_updated += updated
         total_unchanged += unchanged
 
     if dry_run:
-        print(f"\nDry run complete — {total_new} new, {total_updated} updated, {total_unchanged} unchanged (estimated). DB NOT modified.")
+        logger.info("\nDry run complete — %s new, %s updated, %s unchanged (estimated). DB NOT modified.",
+                    total_new, total_updated, total_unchanged)
     else:
         total = db.get_total_record_count(conn)
-        print(f"\nTotal: {total_new} new, {total_updated} updated, {total_unchanged} unchanged")
-        print(f"Database now contains {total} records.")
+        logger.info("\nTotal: %s new, %s updated, %s unchanged",
+                    total_new, total_updated, total_unchanged)
+        logger.info("Database now contains %s records.", total)
 
     conn.close()
 
@@ -214,11 +222,15 @@ def main():
                         help="CSV files to ingest (default: GenericSearchReport*.csv)")
     parser.add_argument("--dry-run", action="store_true",
                         help="Report what would be added without modifying the database")
+    parser.add_argument("--verbose", action="store_true",
+                        help="Enable debug-level logging")
     args = parser.parse_args()
+
+    log.setup_logging(console=True, verbose=args.verbose)
 
     csv_files = args.csv_files or sorted(glob.glob(DEFAULT_CSV_PATTERN))
     if not csv_files:
-        print("No CSV files found. Pass file paths or run from the exports directory.")
+        logger.error("No CSV files found. Pass file paths or run from the exports directory.")
         sys.exit(1)
 
     ingest(csv_files, dry_run=args.dry_run)
