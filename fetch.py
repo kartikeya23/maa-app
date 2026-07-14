@@ -20,6 +20,7 @@ Cache:
 
 import argparse
 import getpass
+import logging
 import re
 import ssl
 import sys
@@ -33,6 +34,9 @@ from requests.adapters import HTTPAdapter
 
 import db
 import ingest
+import log
+
+logger = logging.getLogger("maa.fetch")
 
 
 class _LegacySSLAdapter(HTTPAdapter):
@@ -123,9 +127,10 @@ def _try_browser_cookies(browser_name: str) -> requests.Session | None:
                 session = _new_session()
                 session.cookies.update(cj)
                 if _test_session(session):
-                    print(f"  Reusing existing {name} session (no login needed).")
+                    logger.info("  Reusing existing %s session (no login needed).", name)
                     return session
-            except Exception:
+            except Exception as e:
+                logger.debug("Cookie loader %s failed: %s", name, e)
                 continue
     except ImportError:
         pass
@@ -141,8 +146,8 @@ def _playwright_login(ssoid: str, password: str, browser_name: str) -> requests.
             "Playwright is not installed. Run: pip install playwright && playwright install chromium"
         )
 
-    print("Opening browser for login — fill the CAPTCHA and complete login.")
-    print("The script will take over automatically once you are logged in.")
+    logger.info("Opening browser for login — fill the CAPTCHA and complete login.")
+    logger.info("The script will take over automatically once you are logged in.")
 
     with sync_playwright() as pw:
         launcher = getattr(pw, browser_name)
@@ -192,7 +197,7 @@ def acquire_session(ssoid: str, password: str, browser: str = "chromium") -> req
     session = _try_browser_cookies(browser)
     if session:
         return session
-    print("No valid browser session found — launching browser for login.")
+    logger.info("No valid browser session found — launching browser for login.")
     return _playwright_login(ssoid, password, browser)
 
 
@@ -367,19 +372,19 @@ def fetch_and_ingest(
 
         # Load from cache or fetch fresh
         if not fresh and cache_file.exists():
-            print(f"  [{month}] Using cache: {cache_file}")
+            logger.info("  [%s] Using cache: %s", month, cache_file)
             csv_bytes = cache_file.read_bytes()
         else:
-            print(f"  [{month}] Fetching from portal...", flush=True)
+            logger.info("  [%s] Fetching from portal...", month)
             try:
                 csv_bytes = fetch_month(session, month)
             except RuntimeError as e:
                 if "expired" in str(e).lower():
-                    print(f"  [{month}] Session expired mid-fetch. Re-run to re-authenticate.")
+                    logger.exception("  [%s] Session expired mid-fetch. Re-run to re-authenticate.", month)
                     raise
                 raise
             cache_file.write_bytes(csv_bytes)
-            print(f"  [{month}] Cached to {cache_file}")
+            logger.info("  [%s] Cached to %s", month, cache_file)
 
         # Decode (server may return UTF-8 or UTF-8-BOM)
         csv_str = csv_bytes.decode("utf-8-sig")
@@ -394,7 +399,7 @@ def fetch_and_ingest(
         results[month] = (new, updated, unchanged)
 
         tag = "[DRY RUN] " if dry_run else ""
-        print(f"  [{month}] {tag}{new} new, {updated} updated, {unchanged} unchanged")
+        logger.info("  [%s] %s%s new, %s updated, %s unchanged", month, tag, new, updated, unchanged)
 
     if conn:
         conn.close()
@@ -419,7 +424,11 @@ def main():
                         help="Browser to use for Playwright login (default: chromium)")
     parser.add_argument("--ssoid", default="",
                         help="SSOID username (prompted if omitted and login is needed)")
+    parser.add_argument("--verbose", action="store_true",
+                        help="Enable debug-level logging")
     args = parser.parse_args()
+
+    log.setup_logging(console=True, verbose=args.verbose)
 
     # Determine whether any month needs fetching (not covered by cache)
     needs_fetch = args.fresh or any(
@@ -445,17 +454,16 @@ def main():
             fresh=args.fresh,
         )
     except TimeoutError as e:
-        print(f"\nError: {e}", file=sys.stderr)
+        logger.error("Error: %s", e)
         sys.exit(1)
 
-    print()
-    print(f"{'Month':<12} {'New':>6} {'Updated':>8} {'Unchanged':>10}")
-    print("-" * 40)
+    lines = ["", f"{'Month':<12} {'New':>6} {'Updated':>8} {'Unchanged':>10}", "-" * 40]
     for month, (new, updated, unchanged) in results.items():
-        print(f"{month:<12} {new:>6} {updated:>8} {unchanged:>10}")
+        lines.append(f"{month:<12} {new:>6} {updated:>8} {unchanged:>10}")
+    logger.info("\n".join(lines))
 
     if args.dry_run:
-        print("\nDry run — database was NOT modified.")
+        logger.info("\nDry run — database was NOT modified.")
 
 
 if __name__ == "__main__":
