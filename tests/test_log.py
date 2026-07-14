@@ -68,3 +68,17 @@ def test_writes_to_file(tmp_path):
     content = log_file.read_text()
     assert "hello world" in content
     assert "INFO maa.test:" in content
+
+
+def test_upsert_claims_logs_audit_trail(mem_db, caplog):
+    row = {col: None for col in db.ALL_COLUMNS}
+    row.update(tid="TID900", pkg_code="PKG9", claim_number="CLM900",
+               patient_name="Test Patient", status="Claim Paid")
+    with caplog.at_level(logging.INFO, logger="maa.db"):
+        db.upsert_claims(mem_db, [row])
+    assert "Added 1 claims: TID900/PKG9/CLM900" in caplog.text
+
+    row["status"] = "Claim Approved"
+    with caplog.at_level(logging.INFO, logger="maa.db"):
+        db.upsert_claims(mem_db, [row])
+    assert "Updated 1 claims: TID900/PKG9/CLM900" in caplog.text

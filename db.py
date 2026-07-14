@@ -6,11 +6,14 @@ Schema, upsert, and query functions backed by SQLite.
 import difflib
 import hashlib
 import json
+import logging
 import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
+
+logger = logging.getLogger("maa.db")
 
 DB_PATH = Path(__file__).parent / "maa.db"
 BACKUP_DIR = Path(__file__).parent / "backups"
@@ -163,6 +166,7 @@ def init_db(path: str | Path = DB_PATH) -> sqlite3.Connection:
             "ALTER TABLE doctor_expenses ADD COLUMN doctor_name TEXT NOT NULL DEFAULT 'Dr. Kavesh'"
         )
         conn.commit()
+        logger.info("Schema migration: added doctor_expenses.doctor_name")
     except sqlite3.OperationalError:
         pass  # column already exists (fresh DB or second run)
     conn.commit()
@@ -210,14 +214,19 @@ def upsert_claims(conn: sqlite3.Connection, rows: list[dict], dry_run: bool = Fa
         VALUES (?, ?, ?, ?)
     """
 
+    added_pks: list[tuple] = []
+    updated_pks: list[tuple] = []
+
     for row in rows:
         h = _row_hash(row)
         pk = (row["tid"], row["pkg_code"], row["claim_number"])
 
         if pk not in existing:
             new += 1
+            added_pks.append(pk)
         elif existing[pk] != h:
             updated += 1
+            updated_pks.append(pk)
         else:
             unchanged += 1
             continue  # nothing to write
@@ -230,6 +239,12 @@ def upsert_claims(conn: sqlite3.Connection, rows: list[dict], dry_run: bool = Fa
 
     if not dry_run:
         conn.commit()
+        if added_pks:
+            logger.info("Added %d claims: %s", len(added_pks),
+                        ", ".join("/".join(str(p) for p in pk) for pk in added_pks))
+        if updated_pks:
+            logger.info("Updated %d claims: %s", len(updated_pks),
+                        ", ".join("/".join(str(p) for p in pk) for pk in updated_pks))
     return new, updated, unchanged
 
 
@@ -943,6 +958,7 @@ def backup_db(
         backup_dir.mkdir(parents=True, exist_ok=True)
         target = backup_dir / f"maa-{datetime.now().strftime('%Y-%m-%d')}.db"
         if target.exists():
+            logger.debug("Backup already exists for today: %s", target)
             return target, None
 
         dest = sqlite3.connect(target)
@@ -951,9 +967,11 @@ def backup_db(
                 conn.backup(dest)
         finally:
             dest.close()
+        logger.info("Backup written: %s", target)
     except Exception as e:
         # Remove a partial target so tomorrow's run doesn't mistake a
         # corrupt file for a valid backup.
+        logger.exception("Backup failed")
         if target is not None:
             target.unlink(missing_ok=True)
         return None, str(e)
@@ -962,9 +980,13 @@ def backup_db(
     # report it alongside the successful backup path instead.
     try:
         # Dated names sort lexically == chronologically.
-        for old in sorted(backup_dir.glob("maa-*.db"))[:-keep]:
+        old_files = sorted(backup_dir.glob("maa-*.db"))[:-keep]
+        for old in old_files:
             old.unlink()
+        if old_files:
+            logger.info("Pruned %d old backup(s)", len(old_files))
     except Exception as e:
+        logger.exception("Backup pruning failed")
         return target, f"Backup OK; pruning failed: {e}"
     return target, None
 
