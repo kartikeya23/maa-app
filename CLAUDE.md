@@ -33,6 +33,7 @@ python ingest.py
 - **`ingest.py`** — CSV parsing and ingestion. Handles unusual date formats (`parse_date_dmy`, `parse_payment_date`). Stores Aadhaar/ID/mobile numbers as text to preserve leading zeros.
 - **`fetch.py`** — MAA portal scraper. Reuses an existing browser session (cookies) for fast fetches; falls back to Playwright for a full login flow. Writes CSV cache files for offline reuse.
 - **`reports.py`** — In-memory `.xlsx` generation via openpyxl. Styled headers, color-coded rows (green=paid, amber=query), currency/date formatting, subtotals.
+- **`log.py`** — Logging setup. `setup_logging()` (idempotent) configures `logs/maa.log` (daily rotation, keep 14) plus an optional stdout handler for CLIs. Modules log via `logging.getLogger("maa.<module>")`. `MAA_DEBUG=1` or `--verbose` enables DEBUG.
 - **`utils.py`** — Shared helpers. `fmt_inr()` formats rupee amounts with Indian comma conventions.
 - **`ui/`** — One module per page: `dashboard`, `ingest`, `admissions`, `reports`, `doctor_share`.
 
