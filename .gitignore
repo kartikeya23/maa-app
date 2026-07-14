@@ -19,6 +19,7 @@ maa.db
 backups/
 
 # Logs and exports
+logs/
 *.log
 *.csv
 
