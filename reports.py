@@ -184,10 +184,11 @@ def _write_sheet(ws, df: pd.DataFrame, col_defs: list[tuple], title: str,
         elif status_col_idx is not None:
             statuses_val = str(row.get("statuses", "") or "")
             statuses = {s.strip().lower() for s in statuses_val.split(",")}
+            non_empty_statuses = {s for s in statuses if s}
             queries  = row.get("queries", 0) or 0
             if queries > 0:
                 row_fill = AMBER_FILL
-            elif statuses and all("paid" in s for s in statuses if s):
+            elif non_empty_statuses and all("paid" in s for s in non_empty_statuses):
                 row_fill = GREEN_FILL
             else:
                 row_fill = alt_fill

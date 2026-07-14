@@ -183,11 +183,13 @@ def upsert_claims(conn: sqlite3.Connection, rows: list[dict], dry_run: bool = Fa
 
     # Fetch existing hashes for the PKs we're about to touch
     pks = [(r["tid"], r["pkg_code"], r["claim_number"]) for r in rows]
+    existing = {}
     if pks:
-        placeholders = ",".join("(?,?,?)" for _ in pks)
-        flat = [v for pk in pks for v in pk]
-        existing = {
-            (tid, pkg_code, claim_number): h
+        chunk_size = 250
+        for i in range(0, len(pks), chunk_size):
+            chunk = pks[i : i + chunk_size]
+            placeholders = ",".join("(?,?,?)" for _ in chunk)
+            flat = [v for pk in chunk for v in pk]
             for tid, pkg_code, claim_number, h in conn.execute(
                 f"""
                 SELECT tid, pkg_code, claim_number,
@@ -196,10 +198,8 @@ def upsert_claims(conn: sqlite3.Connection, rows: list[dict], dry_run: bool = Fa
                 WHERE  (tid, pkg_code, claim_number) IN ({placeholders})
                 """,
                 flat,
-            )
-        }
-    else:
-        existing = {}
+            ):
+                existing[(tid, pkg_code, claim_number)] = h
 
     upsert_sql = f"""
         INSERT OR REPLACE INTO claims ({', '.join(ALL_COLUMNS)})
@@ -398,7 +398,13 @@ def query_month_admission_detail(conn: sqlite3.Connection, months: list[str]) ->
         return pd.DataFrame(columns=["month", "tid", "patient_name",
                                      "date_of_admission", "date_of_discharge",
                                      "paid", "received", "approved", "rejected"])
-    placeholders = ",".join("?" for _ in months)
+    where_clauses = []
+    params = []
+    for m in months:
+        where_clauses.append("(date_of_admission >= ? AND date_of_admission <= ?)")
+        params.extend([f"{m}-01", f"{m}-31"])
+    where_sql = " OR ".join(where_clauses)
+
     sql = f"""
         SELECT
             strftime('%Y-%m', date_of_admission)  AS month,
@@ -411,11 +417,11 @@ def query_month_admission_detail(conn: sqlite3.Connection, months: list[str]) ->
             SUM({_RECEIVED_CASE})                 AS received,
             SUM({_REJECTED_CASE})                 AS rejected
         FROM claims
-        WHERE strftime('%Y-%m', date_of_admission) IN ({placeholders})
+        WHERE ({where_sql})
         GROUP BY tid
         ORDER BY month ASC, date_of_admission ASC
     """
-    return pd.read_sql_query(sql, conn, params=months)
+    return pd.read_sql_query(sql, conn, params=params)
 
 
 def query_fy_admission_detail(conn: sqlite3.Connection, fy: str) -> pd.DataFrame:
@@ -720,7 +726,13 @@ def search_claims_for_matching(
         nxt = (dt.replace(day=28) + timedelta(days=4)).strftime("%Y-%m")
         months = [prev, month, nxt]
 
-    placeholders = ",".join("?" for _ in months)
+    where_clauses = []
+    params = []
+    for m in months:
+        where_clauses.append("(date_of_admission >= ? AND date_of_admission <= ?)")
+        params.extend([f"{m}-01", f"{m}-31"])
+    where_sql = " OR ".join(where_clauses)
+
     sql = f"""
         SELECT
             tid,
@@ -731,12 +743,12 @@ def search_claims_for_matching(
                 AS maa_paid,
             GROUP_CONCAT(DISTINCT status) AS status
         FROM claims
-        WHERE strftime('%Y-%m', date_of_admission) IN ({placeholders})
+        WHERE ({where_sql})
           AND tid NOT IN (SELECT tid FROM doctor_expenses WHERE tid IS NOT NULL)
         GROUP BY tid
         ORDER BY date_of_admission DESC
     """
-    rows = conn.execute(sql, months).fetchall()
+    rows = conn.execute(sql, params).fetchall()
     cols = ["tid", "patient_name", "date_of_admission", "date_of_discharge", "maa_paid", "status"]
     candidates = [dict(zip(cols, r)) for r in rows]
 

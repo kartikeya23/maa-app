@@ -105,7 +105,19 @@ def _try_browser_cookies(browser_name: str) -> requests.Session | None:
             "firefox": browser_cookie3.firefox,
             "safari": browser_cookie3.safari,
         }
-        for name, loader in loaders.items():
+        # Map browser_name choice to corresponding browser_cookie3 keys
+        name_map = {
+            "chromium": ["chrome", "chromium"],
+            "firefox": ["firefox"],
+            "webkit": ["safari"],
+        }
+        primary = name_map.get(browser_name, [])
+        ordered_names = primary + [name for name in loaders if name not in primary]
+
+        for name in ordered_names:
+            if name not in loaders:
+                continue
+            loader = loaders[name]
             try:
                 cj = loader()  # no domain filter — avoids missed httponly cookies
                 session = _new_session()
