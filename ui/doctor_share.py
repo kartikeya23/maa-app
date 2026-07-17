@@ -551,13 +551,57 @@ def render(conn) -> None:
         unpaid_ct  = int((df["doctor_paid"] == 0).sum()) if not df.empty else 0
         non_maa_ct = int(df["tid"].isna().sum())          if not df.empty else 0
         filter_note = f" (filtered from {len(full_df)})" if (status_filter or paid_filter != "All" or name_search) else ""
-        _cnt_col, _ref_col = st.columns([8, 1])
+        _cnt_col, _batch_col, _ref_col = st.columns([6, 2.4, 0.6])
         _cnt_col.markdown(
             f"**{len(df)}** {'entry' if len(df) == 1 else 'entries'}{filter_note}"
             f"&ensp;·&ensp;{paid_ct} paid&ensp;·&ensp;{unpaid_ct} unpaid&ensp;·&ensp;{non_maa_ct} non-MAA"
         )
+        if _batch_col.button(
+            "🔄 Refresh MAA Statuses", key="ds_batch_refresh",
+            help="Re-infer MAA status from ingested claims for every linked, unpaid entry "
+                 "in the selected month(s). Ignores the view filters. Does not fetch from "
+                 "the portal — ingest fresh data first.",
+        ):
+            _eligible = full_df[
+                full_df["tid"].notna() & (full_df["maa_status"].fillna("") != "Claim Paid")
+            ]
+            if _eligible.empty:
+                st.toast("No unpaid linked entries to refresh.")
+            else:
+                _batch_entries = [
+                    {
+                        "id": int(_r["id"]),
+                        "tid": _r["tid"],
+                        "maa_status": _r["maa_status"] if pd.notna(_r["maa_status"]) else None,
+                        "patient_name": _r["patient_name"],
+                    }
+                    for _, _r in _eligible.iterrows()
+                ]
+                st.session_state["ds_batch_results"] = db.batch_refresh_maa_status(conn, _batch_entries)
+                st.rerun()
         if _ref_col.button("🔄", key="ds_refresh", help="Refresh entries"):
             st.rerun()
+
+        if "ds_batch_results" in st.session_state:
+            _res = st.session_state["ds_batch_results"]
+            _res_changed = [r for r in _res if r["changed"]]
+            with st.container(border=True):
+                _sum_col, _x_col = st.columns([11, 0.6])
+                _sum_col.markdown(
+                    f"✅ **{len(_res_changed)} updated** &ensp;·&ensp; "
+                    f"{len(_res) - len(_res_changed)} unchanged"
+                )
+                if _x_col.button("✕", key="ds_batch_dismiss", help="Dismiss results"):
+                    del st.session_state["ds_batch_results"]
+                    st.rerun()
+                if _res_changed:
+                    st.table(pd.DataFrame([
+                        {
+                            "Patient": r["patient_name"],
+                            "Status": f"{r['old_status'] or '—'} → {r['new_status']}",
+                        }
+                        for r in _res_changed
+                    ]))
 
         df_r = df.reset_index(drop=True)
         _multi = len(selected_months) > 1
