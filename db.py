@@ -903,14 +903,21 @@ def batch_refresh_maa_status(conn: sqlite3.Connection, entries: list[dict]) -> l
     entries: dicts with id, tid, maa_status (current), patient_name.
     Writes via update_doctor_expense (logged) only when the inferred status
     exists and differs; a None inference (TID absent from claims) leaves the
-    row untouched. Returns per-entry results:
-    {id, patient_name, tid, old_status, new_status, changed}.
+    row untouched. "Query Raised" is a manually-set status that inference can
+    never produce; if the current status is "Query Raised" and inference
+    yields "Claim Raised" (the same underlying portal state — claim
+    submitted, not yet approved), the write is skipped and the entry is
+    reported unchanged. Inference of "Claim Paid", "Claim Approved", or
+    "Rejected" still overwrites "Query Raised" as usual. Returns per-entry
+    results: {id, patient_name, tid, old_status, new_status, changed}.
     """
     results = []
     for entry in entries:
         old_status = entry.get("maa_status")
         inferred = infer_maa_status(conn, entry["tid"])
         changed = inferred is not None and inferred != old_status
+        if changed and old_status == "Query Raised" and inferred == "Claim Raised":
+            changed = False
         if changed:
             update_doctor_expense(conn, entry["id"], {"maa_status": inferred})
         results.append({

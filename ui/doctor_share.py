@@ -526,6 +526,14 @@ def render(conn) -> None:
     elif full_df.empty:
         st.info("No entries for the selected month(s). Use '➕ Add Entry' above.")
     else:
+        _view_key = (selected_months, selected_doctor)
+        if st.session_state.get("ds_view_prev") != _view_key:
+            st.session_state["ds_view_prev"] = _view_key
+            st.session_state["ds_page_num"] = 1
+            st.session_state.pop("ds_batch_results", None)
+        elif "ds_page_num" not in st.session_state:
+            st.session_state["ds_page_num"] = 1
+
         _search_col, _sort_col = st.columns([2, 1])
         name_search = _search_col.text_input(
             "🔍 Search in list", key="ds_name_search", placeholder="Filter by patient name…",
@@ -608,11 +616,6 @@ def render(conn) -> None:
         _PAGE_SIZE = 25
         _total_pages = max(1, (len(df_r) - 1) // _PAGE_SIZE + 1)
 
-        if st.session_state.get("ds_months_prev") != selected_months:
-            st.session_state["ds_months_prev"] = selected_months
-            st.session_state["ds_page_num"] = 1
-        elif "ds_page_num" not in st.session_state:
-            st.session_state["ds_page_num"] = 1
         ds_page = max(1, min(st.session_state["ds_page_num"], _total_pages))
         _start = (ds_page - 1) * _PAGE_SIZE
         _page_rows = df_r.iloc[_start : _start + _PAGE_SIZE]

@@ -638,3 +638,52 @@ def test_batch_refresh_mixed_entries(mem_db):
     assert [r["changed"] for r in results] == [True, False]
     assert results[1]["old_status"] is None
     assert results[1]["new_status"] is None
+
+
+def test_batch_refresh_preserves_query_raised_when_inferred_claim_raised(mem_db):
+    conn = mem_db
+    _insert_claim(conn, "TB04", "Claim Raised", 0.0, 0.0)
+    row_id = db.save_doctor_expense(
+        conn, "2025-06", "Batch Patient", "2025-06-01",
+        maa_status="Query Raised", tid="TB04",
+    )
+
+    results = db.batch_refresh_maa_status(conn, [
+        {"id": row_id, "tid": "TB04", "maa_status": "Query Raised", "patient_name": "Batch Patient"},
+    ])
+
+    assert results[0]["changed"] is False
+    assert results[0]["new_status"] == "Query Raised"
+    status = conn.execute(
+        "SELECT maa_status FROM doctor_expenses WHERE id = ?", (row_id,)
+    ).fetchone()[0]
+    assert status == "Query Raised"
+    log_count = conn.execute(
+        "SELECT COUNT(*) FROM doctor_expenses_log WHERE expense_id = ?", (row_id,)
+    ).fetchone()[0]
+    assert log_count == 0
+
+
+def test_batch_refresh_overwrites_query_raised_when_inferred_claim_paid(mem_db):
+    conn = mem_db
+    _insert_claim(conn, "TB05", "Claim Paid", 10000.0, 10000.0)
+    row_id = db.save_doctor_expense(
+        conn, "2025-06", "Batch Patient", "2025-06-01",
+        maa_status="Query Raised", tid="TB05",
+    )
+
+    results = db.batch_refresh_maa_status(conn, [
+        {"id": row_id, "tid": "TB05", "maa_status": "Query Raised", "patient_name": "Batch Patient"},
+    ])
+
+    assert results[0]["changed"] is True
+    assert results[0]["new_status"] == "Claim Paid"
+    status = conn.execute(
+        "SELECT maa_status FROM doctor_expenses WHERE id = ?", (row_id,)
+    ).fetchone()[0]
+    assert status == "Claim Paid"
+    log = conn.execute(
+        """SELECT field, old_value, new_value FROM doctor_expenses_log
+           WHERE expense_id = ?""", (row_id,)
+    ).fetchall()
+    assert ("maa_status", "Query Raised", "Claim Paid") in log
