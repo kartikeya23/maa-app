@@ -521,3 +521,120 @@ def test_update_doctor_expense_doctor_name(mem_db):
         "SELECT doctor_name FROM doctor_expenses WHERE id = ?", (row_id,)
     ).fetchone()[0]
     assert stored == "Dr. X"
+
+
+# ── batch_refresh_maa_status ──────────────────────────────────────────────────
+
+def _insert_claim(conn, tid, status, approved, paid, pkg_code="PKG1", claim_number="CLM1"):
+    conn.execute(
+        """INSERT INTO claims (
+               tid, patient_name, date_of_admission, date_of_discharge,
+               pkg_code, pkg_name, pkg_rate, status, approved_amount, paid_amount, claim_number,
+               hospital_name, hospital_code, hospital_type, time_of_admission, time_of_discharge,
+               modified_date, id_type, id_number, district_name, aadhaar_number, aadhaar_name,
+               policy_year, mobile_no, payment_type, query_raised, gender, age, payment_date,
+               bank_utr_number, tpa_name, claim_processor_name, claim_processor_ssoid,
+               pkg_speciality_name, package_remark, claim_submission_dt, last_ingested_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                   '', '', '', '', '', '', '', '', '', '', '',
+                   '2025-2026', '', '', 0, 'M', 45, '', '', '', '', '', '', '', '', '')""",
+        (tid, "Batch Patient", "2025-06-01", "2025-06-04",
+         pkg_code, "Pkg", 10000.0, status, approved, paid, claim_number),
+    )
+    conn.commit()
+
+
+def test_batch_refresh_writes_and_logs_changed_status(mem_db):
+    conn = mem_db
+    _insert_claim(conn, "TB01", "Claim Paid", 10000.0, 10000.0)
+    row_id = db.save_doctor_expense(
+        conn, "2025-06", "Batch Patient", "2025-06-01",
+        maa_status="Claim Raised", tid="TB01",
+    )
+
+    results = db.batch_refresh_maa_status(conn, [
+        {"id": row_id, "tid": "TB01", "maa_status": "Claim Raised", "patient_name": "Batch Patient"},
+    ])
+
+    assert results == [{
+        "id": row_id, "patient_name": "Batch Patient", "tid": "TB01",
+        "old_status": "Claim Raised", "new_status": "Claim Paid", "changed": True,
+    }]
+    status = conn.execute(
+        "SELECT maa_status FROM doctor_expenses WHERE id = ?", (row_id,)
+    ).fetchone()[0]
+    assert status == "Claim Paid"
+    log = conn.execute(
+        """SELECT field, old_value, new_value FROM doctor_expenses_log
+           WHERE expense_id = ?""", (row_id,)
+    ).fetchall()
+    assert ("maa_status", "Claim Raised", "Claim Paid") in log
+
+
+def test_batch_refresh_unchanged_row_not_rewritten(mem_db):
+    conn = mem_db
+    _insert_claim(conn, "TB02", "Claim Raised", 0.0, 0.0)
+    row_id = db.save_doctor_expense(
+        conn, "2025-06", "Batch Patient", "2025-06-01",
+        maa_status="Claim Raised", tid="TB02",
+    )
+    conn.execute(
+        "UPDATE doctor_expenses SET updated_at = '2000-01-01 00:00:00' WHERE id = ?",
+        (row_id,),
+    )
+    conn.commit()
+
+    results = db.batch_refresh_maa_status(conn, [
+        {"id": row_id, "tid": "TB02", "maa_status": "Claim Raised", "patient_name": "Batch Patient"},
+    ])
+
+    assert results[0]["changed"] is False
+    assert results[0]["new_status"] == "Claim Raised"
+    updated_at = conn.execute(
+        "SELECT updated_at FROM doctor_expenses WHERE id = ?", (row_id,)
+    ).fetchone()[0]
+    assert updated_at == "2000-01-01 00:00:00", "unchanged row must not be rewritten"
+    log_count = conn.execute(
+        "SELECT COUNT(*) FROM doctor_expenses_log WHERE expense_id = ?", (row_id,)
+    ).fetchone()[0]
+    assert log_count == 0
+
+
+def test_batch_refresh_none_inference_leaves_status_untouched(mem_db):
+    conn = mem_db
+    # No claims rows for this TID at all → infer_maa_status returns None.
+    row_id = db.save_doctor_expense(
+        conn, "2025-06", "Batch Patient", "2025-06-01",
+        maa_status="Claim Raised", tid="TGONE",
+    )
+
+    results = db.batch_refresh_maa_status(conn, [
+        {"id": row_id, "tid": "TGONE", "maa_status": "Claim Raised", "patient_name": "Batch Patient"},
+    ])
+
+    assert results[0]["changed"] is False
+    assert results[0]["new_status"] == "Claim Raised"
+    status = conn.execute(
+        "SELECT maa_status FROM doctor_expenses WHERE id = ?", (row_id,)
+    ).fetchone()[0]
+    assert status == "Claim Raised"
+
+
+def test_batch_refresh_mixed_entries(mem_db):
+    conn = mem_db
+    _insert_claim(conn, "TB03", "Claim Paid", 10000.0, 10000.0)
+    id_change = db.save_doctor_expense(
+        conn, "2025-06", "Changer", "2025-06-01", maa_status="Claim Raised", tid="TB03",
+    )
+    id_gone = db.save_doctor_expense(
+        conn, "2025-06", "Goner", "2025-06-02", maa_status=None, tid="TGONE2",
+    )
+
+    results = db.batch_refresh_maa_status(conn, [
+        {"id": id_change, "tid": "TB03", "maa_status": "Claim Raised", "patient_name": "Changer"},
+        {"id": id_gone, "tid": "TGONE2", "maa_status": None, "patient_name": "Goner"},
+    ])
+
+    assert [r["changed"] for r in results] == [True, False]
+    assert results[1]["old_status"] is None
+    assert results[1]["new_status"] is None

@@ -897,6 +897,35 @@ def update_doctor_expense(conn: sqlite3.Connection, row_id: int, fields: dict) -
     conn.commit()
 
 
+def batch_refresh_maa_status(conn: sqlite3.Connection, entries: list[dict]) -> list[dict]:
+    """Re-infer maa_status from ingested claims for a batch of doctor_expenses entries.
+
+    entries: dicts with id, tid, maa_status (current), patient_name.
+    Writes via update_doctor_expense (logged) only when the inferred status
+    exists and differs; a None inference (TID absent from claims) leaves the
+    row untouched. Returns per-entry results:
+    {id, patient_name, tid, old_status, new_status, changed}.
+    """
+    results = []
+    for entry in entries:
+        old_status = entry.get("maa_status")
+        inferred = infer_maa_status(conn, entry["tid"])
+        changed = inferred is not None and inferred != old_status
+        if changed:
+            update_doctor_expense(conn, entry["id"], {"maa_status": inferred})
+        results.append({
+            "id": entry["id"],
+            "patient_name": entry.get("patient_name"),
+            "tid": entry["tid"],
+            "old_status": old_status,
+            "new_status": inferred if changed else old_status,
+            "changed": changed,
+        })
+    n_changed = sum(1 for r in results if r["changed"])
+    logger.info("Batch MAA status refresh: %d/%d entries updated", n_changed, len(results))
+    return results
+
+
 def get_doctor_expense_log(conn: sqlite3.Connection, expense_id: int) -> pd.DataFrame:
     """Returns the field-level change history for one doctor_expenses row, newest first."""
     return pd.read_sql_query(
