@@ -1,6 +1,6 @@
 # MAA Payment Record Manager
 
-A web application for tracking hospital admission claims under the MAA (Mother's Absolute Affection) health insurance scheme. Supports CSV ingestion, claim browsing with filters, Excel report generation, and per-doctor expense tracking.
+A web application for tracking hospital admission claims under the MAA (Mukhyamantri Ayushman Arogya Yojna) health insurance scheme. Supports CSV ingestion, claim browsing with filters, Excel report generation, and per-doctor expense tracking.
 
 ## Features
 
